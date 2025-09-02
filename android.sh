@@ -43,7 +43,7 @@ ENABLED_CONFIG="\
 DISABLED_CONFIG="\
 		--disable-small \
 		--disable-zlib \
-		--disable-v4l2-m2m \  
+		--disable-v4l2-m2m \
 		--disable-cuda-llvm \
 		--disable-indevs \
 		--disable-libxml2 \
