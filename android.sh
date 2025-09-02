@@ -20,13 +20,13 @@ ENABLED_CONFIG="\
 		--enable-encoder=mpeg4 \
 		--enable-encoder=aac \
 		--enable-encoder=h264 \
-  		--enable-decoder=h264 \
+    --enable-decoder=h264 \
 		--enable-decoder=mpeg4 \
-        --enable-decoder=aac \
+    --enable-decoder=aac \
 		--enable-decoder=mp3 \
-        --enable-decoder=png \
-        --enable-decoder=jpeg2000 \
-        --enable-decoder=jpegls \
+    --enable-decoder=png \
+    --enable-decoder=jpeg2000 \
+    --enable-decoder=jpegls \
 		--enable-muxer=mov \
 		--enable-muxer=3gp \
 		--enable-muxer=mp4 \
@@ -34,7 +34,7 @@ ENABLED_CONFIG="\
 		--enable-protocol=file \
 		--enable-parser=* \
 		--enable-bsf=* \
-  		--enable-libfreetype \
+  	--enable-libfreetype \
 		--enable-filters \
 		--enable-shared"
 
@@ -135,7 +135,69 @@ EOF
 	ninja -C build install
 }
 
+# New: build freetype for Android using meson
+buildFreetype(){
+	TARGET_ARCH=$1
+    TARGET_CPU=$2
+    PREFIX=$3
+    CROSS_PREFIX=$4
+    EXTRA_CFLAGS=$5
+    EXTRA_CXXFLAGS=$6
+    EXTRA_CONFIG=$7
+	CLANG="${CROSS_PREFIX}clang"
+    CLANGXX="${CROSS_PREFIX}clang++"
 
+	if [ "$TARGET_ARCH" = "i686" ]; then
+	    TARGET_ARCH="x86"
+	fi
+
+	if [ ! -d "freetype2" ]; then
+	    echo "Cloning FreeType..."
+	    git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
+	else
+	    echo "Updating FreeType..."
+	    cd freetype2
+	    git pull
+	    cd ..
+	fi
+
+	cd freetype2
+	# --- Create meson cross file for freetype ---
+	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
+	cat > "$CROSS_FILE" <<EOF
+[binaries]
+ c = '$CLANG'
+ cpp = '$CLANGXX'
+ ar = '$LLVM_AR'
+ strip = '$LLVM_STRIP'
+ pkg-config = 'pkg-config'
+
+[properties]
+ needs_exe_wrapper = true
+
+[built-in options]
+ c_args = ['-fpic']
+ cpp_args = ['-fpic']
+
+[host_machine]
+ system = 'android'
+ cpu_family = '$TARGET_ARCH'
+ cpu = '$TARGET_CPU'
+ endian = 'little'
+EOF
+
+	echo "Meson cross file created for freetype: $CROSS_FILE"
+	rm -rf build
+	meson setup build \
+	  --default-library=static \
+	  --prefix=$PREFIX \
+	  --buildtype release \
+	  --cross-file=$CROSS_FILE \
+	  -Dfreetype_modules=all || true
+
+	ninja -C build
+	ninja -C build install
+}
 
 configure_ffmpeg(){
    TARGET_ARCH=$1
@@ -249,6 +311,12 @@ for ARCH in "${ARCH_LIST[@]}"; do
 	buildLibdav1d "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
 		echo "Error compiling $ARCH"
+  		exit 1
+	fi
+	# Build FreeType so ffmpeg's libfreetype and drawtext can link
+	buildFreetype "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+	if [ $? -ne 0 ]; then
+		echo "Error compiling freetype for $ARCH"
   		exit 1
 	fi
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
