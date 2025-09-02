@@ -5,7 +5,7 @@ ANDROID_API_LEVEL="25"
 ARCH_LIST=("armv8a" "armv7a" "x86" "x86-64")
 
 
-### Supported Architectures "armv8a" "armv7a" "x86" "x86-64"  ####### 
+### Supported Architectures "armv8a" "armv7a" "x86" "x86-64"  #######
 
 ### Enable FFMPEG BUILD MODULES ####
 ENABLED_CONFIG="\
@@ -195,6 +195,11 @@ EOF
 
 	ninja -C build
 	ninja -C build install
+
+	if [ ! -f "$PREFIX/lib/pkgconfig/freetype2.pc" ]; then
+      echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
+      exit 1
+  fi
 }
 
 configure_ffmpeg(){
@@ -205,7 +210,7 @@ configure_ffmpeg(){
    EXTRA_CFLAGS=$5
    EXTRA_CXXFLAGS=$6
    EXTRA_CONFIG=$7
-   
+
    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
    CLANG="${CROSS_PREFIX}clang"
    CLANGXX="${CROSS_PREFIX}clang++"
@@ -226,7 +231,7 @@ configure_ffmpeg(){
    --cxx="$CLANGXX" \
    --sysroot="$SYSROOT" \
    --prefix="$PREFIX" \
-   --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include " \
+   --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include -I$PREFIX/include/freetype2 " \
    --extra-cxxflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -std=c++17 -fexceptions -frtti $EXTRA_CXXFLAGS -I$PREFIX/include " \
    --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL -L$PREFIX/lib" \
    --enable-pic \
