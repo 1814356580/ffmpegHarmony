@@ -31,16 +31,24 @@ ENABLED_CONFIG="\
 		--enable-muxer=3gp \
 		--enable-muxer=mp4 \
 		--enable-filter=drawtext \
+		--enable-filter=subtitles \
+		--enable-filter=buffer \
+		--enable-filter=buffersink \
 		--enable-protocol=file \
 		--enable-parser=* \
 		--enable-bsf=* \
   	--enable-libfreetype \
 		--enable-filters \
-		--enable-shared"
+		--enable-shared \
+		--enable-subsdec \
+		--enable-demuxer=subrip \
+		--enable-demuxer=srt \
+		--enable-decoder=subrip \
+		--enable-decoder=srt"
 
 
 ### Disable FFMPEG BUILD MODULES ####
-DISABLED_CONFIG="\
+disableD_CONFIG="\
 		--disable-small \
 		--disable-zlib \
 		--disable-v4l2-m2m \
@@ -54,16 +62,10 @@ DISABLED_CONFIG="\
 		--disable-ffplay \
 		--disable-ffprobe \
 		--disable-doc \
-		--disable-symver \
-		--disable-gpl"
+		--disable-symver"
 
 
 ############ Dont Change ################
-############ Dont Change ################
-############ Dont Change ################
-############ Dont Change ################
-############ Dont Change ################
-
 SYSROOT="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/sysroot"
 LLVM_AR="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
 LLVM_NM="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
@@ -86,7 +88,7 @@ buildLibdav1d(){
 	if [ "$TARGET_ARCH" = "i686" ]; then
 	    TARGET_ARCH="x86"
 	fi
- 
+
 	if [ ! -d "dav1d" ]; then
 	    echo "Cloning libdav1d..."
 	    git clone https://code.videolan.org/videolan/dav1d.git
@@ -96,7 +98,7 @@ buildLibdav1d(){
 	    git pull
 	    cd ..
 	fi
-	
+
 	cd dav1d
 	# --- Create cross file ---
  	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.messon"
@@ -122,7 +124,7 @@ cpu_family = '$TARGET_ARCH'
 cpu = '$TARGET_CPU'
 endian = 'little'
 EOF
-	
+
 	echo "Meson cross file created: $CROSS_FILE"
  	rm -rf build
 	meson setup build \
@@ -130,12 +132,12 @@ EOF
 	  --prefix=$PREFIX \
 	  --buildtype release \
 	  --cross-file=$CROSS_FILE
-	
+
 	ninja -C build
 	ninja -C build install
 }
 
-# New: build freetype for Android using meson
+# Build freetype for Android using meson
 buildFreetype(){
 	TARGET_ARCH=$1
     TARGET_CPU=$2
@@ -231,7 +233,7 @@ configure_ffmpeg(){
    --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL -L$PREFIX/lib" \
    --enable-pic \
    ${ENABLED_CONFIG} \
-   ${DISABLED_CONFIG} \
+   ${disableD_CONFIG} \
    --ar="$LLVM_AR" \
    --nm="$LLVM_NM" \
    --ranlib="$LLVM_RANLIB" \
@@ -239,12 +241,23 @@ configure_ffmpeg(){
    ${EXTRA_CONFIG}
 
    make clean
-   make -j2
-   make install -j2
-   
+   make -j$(nproc)  # 使用所有可用CPU核心加速编译
+   make install -j$(nproc)
 }
 
 echo -e "\e[1;32mCompiling FFMPEG for Android...\e[0m"
+
+# 确保FFMPEG_SOURCE_DIR已设置
+if [ -z "$FFMPEG_SOURCE_DIR" ]; then
+    echo "Error: FFMPEG_SOURCE_DIR is not set"
+    exit 1
+fi
+
+# 确保ANDROID_NDK_PATH已设置
+if [ -z "$ANDROID_NDK_PATH" ]; then
+    echo "Error: ANDROID_NDK_PATH is not set"
+    exit 1
+fi
 
 for ARCH in "${ARCH_LIST[@]}"; do
     case "$ARCH" in
@@ -257,7 +270,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
             CROSS_PREFIX="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/$TARGET_ABI-linux-android${ANDROID_API_LEVEL}-"
             EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
 	        EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
-     
+
             EXTRA_CONFIG="\
 	    	      	--enable-asm \
             		--enable-neon "
@@ -271,7 +284,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
             CROSS_PREFIX="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/$TARGET_ABI-linux-androideabi${ANDROID_API_LEVEL}-"
             EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -mfpu=neon -fomit-frame-pointer"
 	        EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -mfpu=neon -fomit-frame-pointer"
-     
+
             EXTRA_CONFIG="\
             		--disable-armv5te \
             		--disable-armv6 \
@@ -288,7 +301,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
             CROSS_PREFIX="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/$TARGET_ABI-linux-android${ANDROID_API_LEVEL}-"
             EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
 	        EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
-            		
+
             EXTRA_CONFIG="\
 	    	      	--enable-asm "
             ;;
@@ -311,7 +324,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
     esac
 	buildLibdav1d "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
-		echo "Error compiling $ARCH"
+		echo "Error compiling libdav1d for $ARCH"
   		exit 1
 	fi
 	# Build FreeType so ffmpeg's libfreetype and drawtext can link
@@ -322,7 +335,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
 	fi
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
-		echo "Error compiling $ARCH"
+		echo "Error compiling ffmpeg for $ARCH"
   		exit 1
 	fi
 done
