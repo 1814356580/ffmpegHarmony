@@ -193,7 +193,8 @@ EOF
 	  --prefix=$PREFIX \
 	  --buildtype release \
 	  --cross-file=$CROSS_FILE \
-	  -Dzlib=disabled
+	  -Dzlib=disabled \
+	  -Dpng=disabled
 
 	ninja -C build
 	ninja -C build install
