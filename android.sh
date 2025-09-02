@@ -34,6 +34,8 @@ ENABLED_CONFIG="\
 		--enable-protocol=file \
 		--enable-parser=* \
 		--enable-bsf=* \
+  		--enable-libfreetype \
+		--enable-filters /
 		--enable-shared"
 
 
