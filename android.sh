@@ -39,16 +39,11 @@ ENABLED_CONFIG="\
 		--enable-bsf=* \
   	--enable-libfreetype \
 		--enable-filters \
-		--enable-shared \
-		--enable-subsdec \
-		--enable-demuxer=subrip \
-		--enable-demuxer=srt \
-		--enable-decoder=subrip \
-		--enable-decoder=srt"
+		--enable-shared"
 
 
 ### Disable FFMPEG BUILD MODULES ####
-disableD_CONFIG="\
+DISABLED_CONFIG="\
 		--disable-small \
 		--disable-zlib \
 		--disable-v4l2-m2m \
@@ -94,12 +89,12 @@ buildLibdav1d(){
 	    git clone https://code.videolan.org/videolan/dav1d.git
 	else
 	    echo "Updating libdav1d..."
-	    cd dav1d
+	    cd dav1d || exit 1
 	    git pull
 	    cd ..
 	fi
 
-	cd dav1d
+	cd dav1d || exit 1
 	# --- Create cross file ---
  	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.messon"
 	cat > "$CROSS_FILE" <<EOF
@@ -158,12 +153,12 @@ buildFreetype(){
 	    git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
 	else
 	    echo "Updating FreeType..."
-	    cd freetype2
+	    cd freetype2 || exit 1
 	    git pull
 	    cd ..
 	fi
 
-	cd freetype2
+	cd freetype2 || exit 1
 	# --- Create meson cross file for freetype ---
 	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
 	cat > "$CROSS_FILE" <<EOF
@@ -214,8 +209,11 @@ configure_ffmpeg(){
    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
    CLANG="${CROSS_PREFIX}clang"
    CLANGXX="${CROSS_PREFIX}clang++"
-   
-   cd "$FFMPEG_SOURCE_DIR"
+
+   # Show detected freetype to help ensure drawtext can be enabled
+   echo "freetype2 version: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
+
+   cd "$FFMPEG_SOURCE_DIR" || exit 1
    ./configure \
    --disable-everything \
    --target-os=android \
@@ -233,16 +231,22 @@ configure_ffmpeg(){
    --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL -L$PREFIX/lib" \
    --enable-pic \
    ${ENABLED_CONFIG} \
-   ${disableD_CONFIG} \
+   ${DISABLED_CONFIG} \
    --ar="$LLVM_AR" \
    --nm="$LLVM_NM" \
    --ranlib="$LLVM_RANLIB" \
    --strip="$LLVM_STRIP" \
    ${EXTRA_CONFIG}
 
+   # Verify drawtext got enabled in configure step
+   if ! grep -q "^#define CONFIG_DRAWTEXT_FILTER 1" config.h 2>/dev/null; then
+     echo "Error: drawtext filter is NOT enabled. Check freetype2 detection and flags. See config.log for details."
+     exit 1
+   fi
+
    make clean
-   make -j$(nproc)  # 使用所有可用CPU核心加速编译
-   make install -j$(nproc)
+   make -j"$(nproc)"  # 使用所有可用CPU核心加速编译
+   make install -j"$(nproc)"
 }
 
 echo -e "\e[1;32mCompiling FFMPEG for Android...\e[0m"
@@ -331,11 +335,12 @@ for ARCH in "${ARCH_LIST[@]}"; do
 	buildFreetype "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
 		echo "Error compiling freetype for $ARCH"
-  		exit 1
+  	 exit 1
 	fi
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
 		echo "Error compiling ffmpeg for $ARCH"
   		exit 1
 	fi
+
 done
