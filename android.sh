@@ -19,25 +19,20 @@ ENABLED_CONFIG="\
 		--enable-demuxer=* \
 		--enable-encoder=mpeg4 \
 		--enable-encoder=aac \
-		--enable-encoder=h264 \
-    --enable-decoder=h264 \
+		--enable-decoder=h264 \
 		--enable-decoder=mpeg4 \
-    --enable-decoder=aac \
-		--enable-decoder=mp3 \
-    --enable-decoder=png \
-    --enable-decoder=jpeg2000 \
-    --enable-decoder=jpegls \
+		--enable-decoder=aac \
+		--enable-decoder=png \
+		--enable-decoder=jpeg2000 \
+		--enable-decoder=jpegls \
 		--enable-muxer=mov \
-		--enable-muxer=3gp \
 		--enable-muxer=mp4 \
 		--enable-filter=drawtext \
-		--enable-filter=subtitles \
-		--enable-filter=buffer \
-		--enable-filter=buffersink \
 		--enable-protocol=file \
 		--enable-parser=* \
 		--enable-bsf=* \
   	--enable-libfreetype \
+  	--enable-libharfbuzz \
 		--enable-filters \
 		--enable-shared"
 
@@ -45,7 +40,6 @@ ENABLED_CONFIG="\
 ### Disable FFMPEG BUILD MODULES ####
 DISABLED_CONFIG="\
 		--disable-small \
-		--disable-zlib \
 		--disable-v4l2-m2m \
 		--disable-cuda-llvm \
 		--disable-indevs \
@@ -202,6 +196,80 @@ EOF
   fi
 }
 
+# Build HarfBuzz for Android (required by FFmpeg drawtext)
+buildHarfBuzz(){
+    TARGET_ARCH=$1
+    TARGET_CPU=$2
+    PREFIX=$3
+    CROSS_PREFIX=$4
+    EXTRA_CFLAGS=$5
+    EXTRA_CXXFLAGS=$6
+    EXTRA_CONFIG=$7
+    CLANG="${CROSS_PREFIX}clang"
+    CLANGXX="${CROSS_PREFIX}clang++"
+
+    if [ "$TARGET_ARCH" = "i686" ]; then
+        TARGET_ARCH="x86"
+    fi
+
+    if [ ! -d "harfbuzz" ]; then
+        echo "Cloning HarfBuzz..."
+        git clone https://github.com/harfbuzz/harfbuzz.git
+    else
+        echo "Updating HarfBuzz..."
+        cd harfbuzz || exit 1
+        git pull
+        cd ..
+    fi
+
+    cd harfbuzz || exit 1
+    CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
+    cat > "$CROSS_FILE" <<EOF
+[binaries]
+ c = '$CLANG'
+ cpp = '$CLANGXX'
+ ar = '$LLVM_AR'
+ strip = '$LLVM_STRIP'
+ pkg-config = 'pkg-config'
+
+[properties]
+ needs_exe_wrapper = true
+
+[built-in options]
+ c_args = ['-fpic']
+ cpp_args = ['-fpic']
+
+[host_machine]
+ system = 'android'
+ cpu_family = '$TARGET_ARCH'
+ cpu = '$TARGET_CPU'
+ endian = 'little'
+EOF
+
+    echo "Meson cross file created for harfbuzz: $CROSS_FILE"
+    rm -rf build
+    meson setup build \
+      --default-library=static \
+      --prefix=$PREFIX \
+      --buildtype release \
+      --cross-file=$CROSS_FILE \
+      -Dicu=disabled \
+      -Dgraphite2=disabled \
+      -Dglib=disabled \
+      -Dgobject=disabled \
+      -Dcairo=disabled \
+      -Dtests=disabled \
+      -Dintrospection=disabled
+
+    ninja -C build
+    ninja -C build install
+
+    if [ ! -f "$PREFIX/lib/pkgconfig/harfbuzz.pc" ]; then
+      echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
+      exit 1
+    fi
+}
+
 configure_ffmpeg(){
    TARGET_ARCH=$1
    TARGET_CPU=$2
@@ -215,8 +283,9 @@ configure_ffmpeg(){
    CLANG="${CROSS_PREFIX}clang"
    CLANGXX="${CROSS_PREFIX}clang++"
 
-   # Show detected freetype to help ensure drawtext can be enabled
+   # Show detected freetype/harfbuzz to help ensure drawtext can be enabled
    echo "freetype2 version: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
+   echo "harfbuzz version: $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
 
    cd "$FFMPEG_SOURCE_DIR" || exit 1
    ./configure \
@@ -245,7 +314,7 @@ configure_ffmpeg(){
 
    # Verify drawtext got enabled in configure step
    if ! grep -q "^#define CONFIG_DRAWTEXT_FILTER 1" config.h 2>/dev/null; then
-     echo "Error: drawtext filter is NOT enabled. Check freetype2 detection and flags. See config.log for details."
+     echo "Error: drawtext filter is NOT enabled. Check freetype2/harfbuzz detection and flags. See config.log for details."
      exit 1
    fi
 
@@ -268,6 +337,12 @@ if [ -z "$ANDROID_NDK_PATH" ]; then
     exit 1
 fi
 
+# Provide a safe default build directory
+if [ -z "$FFMPEG_BUILD_DIR" ]; then
+    export FFMPEG_BUILD_DIR="$(pwd)"
+    echo "FFMPEG_BUILD_DIR not set; defaulting to $(pwd)"
+fi
+
 for ARCH in "${ARCH_LIST[@]}"; do
     case "$ARCH" in
         "armv8-a"|"aarch64"|"arm64-v8a"|"armv8a")
@@ -281,7 +356,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
 	        EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
 
             EXTRA_CONFIG="\
-	    	      	--enable-asm \
+				      	--enable-asm \
             		--enable-neon "
             ;;
         "armv7-a"|"armeabi-v7a"|"armv7a")
@@ -298,7 +373,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
             		--disable-armv5te \
             		--disable-armv6 \
             		--disable-armv6t2 \
-	      			--enable-asm \
+		      		--enable-asm \
             		--enable-neon "
             ;;
         "x86-64"|"x86_64")
@@ -312,7 +387,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
 	        EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
 
             EXTRA_CONFIG="\
-	    	      	--enable-asm "
+				      	--enable-asm "
             ;;
         "x86"|"i686")
             echo -e "\e[1;32m$ARCH Libraries\e[0m"
@@ -324,7 +399,7 @@ for ARCH in "${ARCH_LIST[@]}"; do
             EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
 	        EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
             EXTRA_CONFIG="\
-            		 --disable-asm "
+            			 --disable-asm "
             ;;
            * )
             echo "Unknown architecture: $ARCH"
@@ -342,6 +417,12 @@ for ARCH in "${ARCH_LIST[@]}"; do
 		echo "Error compiling freetype for $ARCH"
   	 exit 1
 	fi
+    # Build HarfBuzz so drawtext can be enabled
+    buildHarfBuzz "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+    if [ $? -ne 0 ]; then
+        echo "Error compiling harfbuzz for $ARCH"
+        exit 1
+    fi
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
 		echo "Error compiling ffmpeg for $ARCH"
