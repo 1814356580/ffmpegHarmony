@@ -9,49 +9,52 @@ ARCH_LIST=("armv8a" "armv7a" "x86" "x86-64")
 
 ### Enable FFMPEG BUILD MODULES ####
 ENABLED_CONFIG="\
-		--enable-avcodec \
-		--enable-avformat \
-		--enable-avutil \
-		--enable-swscale \
-		--enable-swresample \
-		--enable-avfilter \
-		--enable-libdav1d \
-		--enable-demuxer=* \
-		--enable-encoder=mpeg4 \
-		--enable-encoder=aac \
-		--enable-decoder=h264 \
-		--enable-decoder=mpeg4 \
-		--enable-decoder=aac \
-		--enable-decoder=png \
-		--enable-decoder=jpeg2000 \
-		--enable-decoder=jpegls \
-		--enable-muxer=mov \
-		--enable-muxer=mp4 \
-		--enable-filter=drawtext \
-		--enable-protocol=file \
-		--enable-parser=* \
-		--enable-bsf=* \
-  	--enable-libfreetype \
-  	--enable-libharfbuzz \
-		--enable-filters \
-		--enable-shared"
+  --enable-avcodec \
+  --enable-avformat \
+  --enable-avutil \
+  --enable-swscale \
+  --enable-swresample \
+  --enable-avfilter \
+  --enable-libdav1d \
+  --enable-libfreetype \
+  --enable-libharfbuzz \
+  --enable-encoder=mpeg4 \
+  --enable-encoder=aac \
+  --enable-encoder=h264 \
+  --enable-decoder=h264 \
+  --enable-decoder=mpeg4 \
+  --enable-decoder=aac \
+  --enable-decoder=mp3 \
+  --enable-decoder=png \
+  --enable-decoder=jpeg2000 \
+  --enable-decoder=jpegls \
+  --enable-demuxer=* \
+  --enable-muxer=mov \
+  --enable-muxer=3gp \
+  --enable-muxer=mp4 \
+  --enable-filter=drawtext \
+  --enable-filters \
+  --enable-protocol=file \
+  --enable-parser=* \
+  --enable-bsf=* \
+  --enable-shared"
 
 
 ### Disable FFMPEG BUILD MODULES ####
 DISABLED_CONFIG="\
 		--disable-small \
-		--disable-v4l2-m2m \
-		--disable-cuda-llvm \
-		--disable-indevs \
-		--disable-libxml2 \
-		--disable-avdevice \
-		--disable-network \
-		--disable-static \
-		--disable-debug \
-		--disable-ffplay \
-		--disable-ffprobe \
-		--disable-doc \
-		--disable-symver"
+    --disable-static \
+    --disable-debug \
+    --disable-symver \
+    --disable-ffplay \
+    --disable-ffprobe \
+    --disable-doc \
+    --disable-v4l2-m2m \
+    --disable-cuda-llvm \
+    --disable-indevs \
+    --disable-avdevice \
+    --disable-network \
+    --disable-libxml2"
 
 
 ############ Dont Change ################
@@ -353,7 +356,8 @@ fi
 
 # Provide a safe default build directory
 if [ -z "$FFMPEG_BUILD_DIR" ]; then
-    export FFMPEG_BUILD_DIR="$(pwd)"
+    FFMPEG_BUILD_DIR="$(pwd)"
+    export FFMPEG_BUILD_DIR
     echo "FFMPEG_BUILD_DIR not set; defaulting to $(pwd)"
 fi
 
