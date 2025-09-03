@@ -90,7 +90,7 @@ buildLibdav1d(){
 
 	cd dav1d || exit 1
 	# --- Create cross file ---
- 	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.messon"
+ 	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
 	cat > "$CROSS_FILE" <<EOF
 [binaries]
 c = '$CLANG'
@@ -314,16 +314,19 @@ configure_ffmpeg(){
    --strip="$LLVM_STRIP" \
    ${EXTRA_CONFIG} 2>&1 | tee "$CONFIG_SUMMARY_FILE"
 
-   # Verify drawtext got enabled in configure step (check both headers and config.mak or the configure summary)
-   if ! (grep -Eq '#define[[:space:]]+CONFIG_DRAWTEXT_FILTER[[:space:]]+1' config.h 2>/dev/null || \
-         grep -Eq '^[[:space:]]*CONFIG_DRAWTEXT_FILTER[[:space:]]*=[[:space:]]*yes' config.mak 2>/dev/null || \
-         grep -Eq 'Enabled filters:.*([ ,]|^)drawtext([ ,]|$)' "$CONFIG_SUMMARY_FILE" 2>/dev/null);
-   then
+   # Verify drawtext got enabled in configure step.
+   # 1) config.h define, 2) config.mak variable, 3) presence in the multi-line Enabled filters section.
+   if ! (
+        grep -Eq '#define[[:space:]]+CONFIG_DRAWTEXT_FILTER[[:space:]]+1' config.h 2>/dev/null || \
+        grep -Eq '(^|[[:space:]])CONFIG_DRAWTEXT_FILTER[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null || \
+        awk '/^Enabled filters:/{inlist=1;next} /^Enabled /{inlist=0} inlist && $0 ~ /(^|[ ,])drawtext([ ,]|$)/{found=1} END{exit !found}' "$CONFIG_SUMMARY_FILE" 2>/dev/null
+      ); then
      echo "Error: drawtext filter is NOT enabled. Check freetype2/harfbuzz detection and flags. See config.log for details."
      echo "Diagnostics:"
      echo "- freetype2: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
      echo "- harfbuzz:  $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
-     echo "- Snippet from $CONFIG_SUMMARY_FILE:" && grep -E 'Enabled filters:|Enabled libraries:' -n "$CONFIG_SUMMARY_FILE" 2>/dev/null || true
+     echo "- Snippet from $CONFIG_SUMMARY_FILE:" && \
+       awk 'p&&!--n; /^Enabled filters:/{p=1;n=60;print;next} p{print}' "$CONFIG_SUMMARY_FILE" 2>/dev/null | sed -n '1,80p' || true
      echo "- Snippet from config.h:" && grep -E 'CONFIG_(DRAWTEXT_FILTER|LIBFREETYPE|LIBHARFBUZZ)' -n config.h 2>/dev/null || true
      echo "- Snippet from config.mak:" && grep -E 'CONFIG_(DRAWTEXT_FILTER|LIBFREETYPE|LIBHARFBUZZ)=' -n config.mak 2>/dev/null || true
      exit 1
