@@ -410,7 +410,8 @@ EOF
     --prefix=$PREFIX \
     --buildtype release \
     --cross-file=$CROSS_FILE \
-    -Dfontconfig=disabled
+    -Dfontconfig=disabled \
+    -Drequire-system-font-provider=false
 
   ninja -C build
   ninja -C build install
