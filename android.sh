@@ -274,6 +274,156 @@ EOF
     fi
 }
 
+# Build FriBidi (required by libass)
+buildFriBiDi(){
+  TARGET_ARCH=$1
+  TARGET_CPU=$2
+  PREFIX=$3
+  CROSS_PREFIX=$4
+  EXTRA_CFLAGS=$5
+  EXTRA_CXXFLAGS=$6
+  EXTRA_CONFIG=$7
+
+  CLANG="${CROSS_PREFIX}clang"
+  CLANGXX="${CROSS_PREFIX}clang++"
+
+  if [ "$TARGET_ARCH" = "i686" ]; then
+    TARGET_ARCH="x86"
+  fi
+
+  if [ ! -d "fribidi" ]; then
+    echo "Cloning FriBidi..."
+    git clone https://github.com/fribidi/fribidi.git
+  else
+    echo "Updating FriBidi..."
+    cd fribidi || exit 1
+    git pull
+    cd ..
+  fi
+
+  cd fribidi || exit 1
+  CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
+  cat > "$CROSS_FILE" <<EOF
+[binaries]
+c = '$CLANG'
+cpp = '$CLANGXX'
+ar = '$LLVM_AR'
+strip = '$LLVM_STRIP'
+pkg-config = 'pkg-config'
+
+[properties]
+needs_exe_wrapper = true
+
+[built-in options]
+c_args = ['-fpic']
+cpp_args = ['-fpic']
+c_link_args = ['-Wl,-z,max-page-size=16384']
+
+[host_machine]
+system = 'android'
+cpu_family = '$TARGET_ARCH'
+cpu = '$TARGET_CPU'
+endian = 'little'
+EOF
+
+  echo "Meson cross file created for fribidi: $CROSS_FILE"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+
+  rm -rf build
+  meson setup build \
+    --default-library=static \
+    --prefix=$PREFIX \
+    --buildtype release \
+    --cross-file=$CROSS_FILE \
+    -Ddocs=false -Dtests=false -Ddeprecated=false
+
+  ninja -C build
+  ninja -C build install
+
+  if [ ! -f "$PREFIX/lib/pkgconfig/fribidi.pc" ]; then
+    echo "Error: fribidi.pc not found in $PREFIX/lib/pkgconfig"
+    exit 1
+  fi
+  cd ..
+}
+
+# Build libass for Android (uses freetype + fribidi, optionally harfbuzz)
+buildLibass(){
+  TARGET_ARCH=$1
+  TARGET_CPU=$2
+  PREFIX=$3
+  CROSS_PREFIX=$4
+  EXTRA_CFLAGS=$5
+  EXTRA_CXXFLAGS=$6
+  EXTRA_CONFIG=$7
+
+  CLANG="${CROSS_PREFIX}clang"
+  CLANGXX="${CROSS_PREFIX}clang++"
+
+  if [ "$TARGET_ARCH" = "i686" ]; then
+    TARGET_ARCH="x86"
+  fi
+
+  if [ ! -d "libass" ]; then
+    echo "Cloning libass..."
+    git clone https://github.com/libass/libass.git
+  else
+    echo "Updating libass..."
+    cd libass || exit 1
+    git pull
+    cd ..
+  fi
+
+  cd libass || exit 1
+  CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
+  cat > "$CROSS_FILE" <<EOF
+[binaries]
+c = '$CLANG'
+cpp = '$CLANGXX'
+ar = '$LLVM_AR'
+strip = '$LLVM_STRIP'
+pkg-config = 'pkg-config'
+
+[properties]
+needs_exe_wrapper = true
+
+[built-in options]
+c_args = ['-fpic', '-I$PREFIX/include', '-I$PREFIX/include/freetype2']
+cpp_args = ['-fpic']
+c_link_args = ['-Wl,-z,max-page-size=16384']
+
+[host_machine]
+system = 'android'
+cpu_family = '$TARGET_ARCH'
+cpu = '$TARGET_CPU'
+endian = 'little'
+EOF
+
+  echo "Meson cross file created for libass: $CROSS_FILE"
+  export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+  export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
+
+  rm -rf build
+  meson setup build \
+    --default-library=static \
+    --prefix=$PREFIX \
+    --buildtype release \
+    --cross-file=$CROSS_FILE \
+    -Dfontconfig=disabled \
+    -Dfreetype=enabled \
+    -Dharfbuzz=enabled
+
+  ninja -C build
+  ninja -C build install
+
+  if [ ! -f "$PREFIX/lib/pkgconfig/libass.pc" ]; then
+    echo "Error: libass.pc not found in $PREFIX/lib/pkgconfig"
+    exit 1
+  fi
+  cd ..
+}
+
 configure_ffmpeg(){
    TARGET_ARCH=$1
    TARGET_CPU=$2
@@ -284,12 +434,15 @@ configure_ffmpeg(){
    EXTRA_CONFIG=$7
 
    export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
+   export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
    CLANG="${CROSS_PREFIX}clang"
    CLANGXX="${CROSS_PREFIX}clang++"
 
-   # Show detected freetype/harfbuzz to help ensure drawtext can be enabled
+   # Show detected libraries to help ensure they can be enabled
    echo "freetype2 version: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
    echo "harfbuzz version: $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
+   echo "fribidi version: $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
+   echo "libass version: $(pkg-config --modversion libass 2>/dev/null || echo not found)"
 
    cd "$FFMPEG_SOURCE_DIR" || exit 1
    # Capture configure output for robust verification
@@ -318,8 +471,7 @@ configure_ffmpeg(){
    --strip="$LLVM_STRIP" \
    ${EXTRA_CONFIG} 2>&1 | tee "$CONFIG_SUMMARY_FILE"
 
-   # Verify drawtext got enabled in configure step.
-   # 1) config.h define, 2) config.mak variable, 3) presence in the multi-line Enabled filters section.
+   # Verify drawtext and libass got enabled in configure step.
    if ! (
         grep -Eq '#define[[:space:]]+CONFIG_DRAWTEXT_FILTER[[:space:]]+1' config.h 2>/dev/null || \
         grep -Eq '(^|[[:space:]])CONFIG_DRAWTEXT_FILTER[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null || \
@@ -333,6 +485,20 @@ configure_ffmpeg(){
        awk 'p&&!--n; /^Enabled filters:/{p=1;n=60;print;next} p{print}' "$CONFIG_SUMMARY_FILE" 2>/dev/null | sed -n '1,80p' || true
      echo "- Snippet from config.h:" && grep -E 'CONFIG_(DRAWTEXT_FILTER|LIBFREETYPE|LIBHARFBUZZ)' -n config.h 2>/dev/null || true
      echo "- Snippet from config.mak:" && grep -E 'CONFIG_(DRAWTEXT_FILTER|LIBFREETYPE|LIBHARFBUZZ)=' -n config.mak 2>/dev/null || true
+     exit 1
+   fi
+
+   # Verify libass got enabled
+   if ! (
+        grep -Eq '#define[[:space:]]+CONFIG_LIBASS[[:space:]]+1' config.h 2>/dev/null || \
+        grep -Eq '(^|[[:space:]])CONFIG_LIBASS[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null
+      ); then
+     echo "Error: libass is NOT enabled. Check libass/fribidi detection and flags. See config.log for details."
+     echo "Diagnostics:"
+     echo "- fribidi: $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
+     echo "- libass:  $(pkg-config --modversion libass 2>/dev/null || echo not found)"
+     echo "- Snippet from config.h:" && grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)' -n config.h 2>/dev/null || true
+     echo "- Snippet from config.mak:" && grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)=' -n config.mak 2>/dev/null || true
      exit 1
    fi
 
@@ -440,6 +606,18 @@ for ARCH in "${ARCH_LIST[@]}"; do
     buildHarfBuzz "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
     if [ $? -ne 0 ]; then
         echo "Error compiling harfbuzz for $ARCH"
+        exit 1
+    fi
+    # Build FriBidi so libass can be enabled
+    buildFriBiDi "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+    if [ $? -ne 0 ]; then
+        echo "Error compiling fribidi for $ARCH"
+        exit 1
+    fi
+    # Build libass for Android
+    buildLibass "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+    if [ $? -ne 0 ]; then
+        echo "Error compiling libass for $ARCH"
         exit 1
     fi
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
