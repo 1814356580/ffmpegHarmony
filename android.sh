@@ -29,6 +29,7 @@ ENABLED_CONFIG="\
   --enable-decoder=png \
   --enable-decoder=jpeg \
   --enable-decoder=aac \
+  --enable-decoder=mp3 \
   --enable-demuxer=mp4,avi,png,jpeg,aac,mp3 \
   --enable-muxer=mp4 \
   --enable-filter=subtitles \
