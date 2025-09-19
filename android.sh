@@ -472,8 +472,6 @@ EOF
         --prefix=$PREFIX \
         --buildtype release \
         --cross-file=$CROSS_FILE \
-        -Dfreetype=enabled \
-        -Dharfbuzz=enabled \
         -Dfontconfig=disabled \
         -Drequire-system-font-provider=false
 
