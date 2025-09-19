@@ -15,31 +15,22 @@ ENABLED_CONFIG="\
   --enable-swscale \
   --enable-swresample \
   --enable-avfilter \
-  --enable-libdav1d \
-  --enable-libfreetype \
-  --enable-libharfbuzz \
-  --enable-encoder=mpeg4 \
-  --enable-encoder=aac \
+  --enable-libass \
   --enable-encoder=h264 \
+  --enable-encoder=aac \
   --enable-decoder=h264 \
   --enable-decoder=mpeg4 \
-  --enable-decoder=aac \
-  --enable-decoder=mp3 \
   --enable-decoder=png \
-  --enable-decoder=jpeg2000 \
-  --enable-decoder=jpegls \
-  --enable-demuxer=* \
-  --enable-muxer=mov \
-  --enable-muxer=3gp \
+  --enable-decoder=jpeg \
+  --enable-decoder=aac \
+  --enable-demuxer=mp4,avi,png,jpeg,aac,mp3 \
   --enable-muxer=mp4 \
-  --enable-filter=drawtext \
-  --enable-filters \
+  --enable-filter=subtitles \
   --enable-protocol=file \
-  --enable-parser=* \
-  --enable-bsf=* \
-  --enable-libass \
+  --enable-parser=h264,aac,mpeg4,png,jpeg \
+  --enable-bsf=h264_mp4toannexb,aac_adtstoasc \
+  --enable-small \
   --enable-shared"
-
 
 ### Disable FFMPEG BUILD MODULES ####
 DISABLED_CONFIG="\
@@ -130,150 +121,6 @@ EOF
 	ninja -C build install
 }
 
-# Build freetype for Android using meson
-buildFreetype(){
-	TARGET_ARCH=$1
-    TARGET_CPU=$2
-    PREFIX=$3
-    CROSS_PREFIX=$4
-    EXTRA_CFLAGS=$5
-    EXTRA_CXXFLAGS=$6
-    EXTRA_CONFIG=$7
-	CLANG="${CROSS_PREFIX}clang"
-    CLANGXX="${CROSS_PREFIX}clang++"
-
-	if [ "$TARGET_ARCH" = "i686" ]; then
-	    TARGET_ARCH="x86"
-	fi
-
-	if [ ! -d "freetype2" ]; then
-	    echo "Cloning FreeType..."
-	    git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
-	else
-	    echo "Updating FreeType..."
-	    cd freetype2 || exit 1
-	    git pull
-	    cd ..
-	fi
-
-	cd freetype2 || exit 1
-	# --- Create meson cross file for freetype ---
-	CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-	cat > "$CROSS_FILE" <<EOF
-[binaries]
- c = '$CLANG'
- cpp = '$CLANGXX'
- ar = '$LLVM_AR'
- strip = '$LLVM_STRIP'
- pkg-config = 'pkg-config'
-
-[properties]
- needs_exe_wrapper = true
-
-[built-in options]
- c_args = ['-fpic']
- cpp_args = ['-fpic']
-
-[host_machine]
- system = 'android'
- cpu_family = '$TARGET_ARCH'
- cpu = '$TARGET_CPU'
- endian = 'little'
-EOF
-
-	echo "Meson cross file created for freetype: $CROSS_FILE"
-	rm -rf build
-	meson setup build \
-	  --default-library=static \
-	  --prefix=$PREFIX \
-	  --buildtype release \
-	  --cross-file=$CROSS_FILE \
-	  -Dzlib=disabled \
-	  -Dpng=disabled
-
-	ninja -C build
-	ninja -C build install
-
-	if [ ! -f "$PREFIX/lib/pkgconfig/freetype2.pc" ]; then
-      echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
-      exit 1
-  fi
-}
-
-# Build HarfBuzz for Android (required by FFmpeg drawtext)
-buildHarfBuzz(){
-    TARGET_ARCH=$1
-    TARGET_CPU=$2
-    PREFIX=$3
-    CROSS_PREFIX=$4
-    EXTRA_CFLAGS=$5
-    EXTRA_CXXFLAGS=$6
-    EXTRA_CONFIG=$7
-    CLANG="${CROSS_PREFIX}clang"
-    CLANGXX="${CROSS_PREFIX}clang++"
-
-    if [ "$TARGET_ARCH" = "i686" ]; then
-        TARGET_ARCH="x86"
-    fi
-
-    if [ ! -d "harfbuzz" ]; then
-        echo "Cloning HarfBuzz..."
-        git clone https://github.com/harfbuzz/harfbuzz.git
-    else
-        echo "Updating HarfBuzz..."
-        cd harfbuzz || exit 1
-        git pull
-        cd ..
-    fi
-
-    cd harfbuzz || exit 1
-    CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-    cat > "$CROSS_FILE" <<EOF
-[binaries]
- c = '$CLANG'
- cpp = '$CLANGXX'
- ar = '$LLVM_AR'
- strip = '$LLVM_STRIP'
- pkg-config = 'pkg-config'
-
-[properties]
- needs_exe_wrapper = true
-
-[built-in options]
- c_args = ['-fpic']
- cpp_args = ['-fpic']
-
-[host_machine]
- system = 'android'
- cpu_family = '$TARGET_ARCH'
- cpu = '$TARGET_CPU'
- endian = 'little'
-EOF
-
-    echo "Meson cross file created for harfbuzz: $CROSS_FILE"
-    rm -rf build
-    meson setup build \
-      --default-library=static \
-      --prefix=$PREFIX \
-      --buildtype release \
-      --cross-file=$CROSS_FILE \
-      -Dicu=disabled \
-      -Dgraphite2=disabled \
-      -Dglib=disabled \
-      -Dgobject=disabled \
-      -Dcairo=disabled \
-      -Dtests=disabled \
-      -Dintrospection=disabled
-
-    ninja -C build
-    ninja -C build install
-
-    if [ ! -f "$PREFIX/lib/pkgconfig/harfbuzz.pc" ]; then
-      echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
-      exit 1
-    fi
-}
-
 # Build FriBidi (required by libass)
 buildFriBiDi(){
   TARGET_ARCH=$1
@@ -348,7 +195,7 @@ EOF
   cd ..
 }
 
-# Build libass for Android (uses freetype + fribidi, optionally harfbuzz)
+# Build libass for Android (uses fribidi)
 buildLibass(){
   TARGET_ARCH=$1
   TARGET_CPU=$2
@@ -389,7 +236,7 @@ pkg-config = 'pkg-config'
 needs_exe_wrapper = true
 
 [built-in options]
-c_args = ['-fpic', '-I$PREFIX/include', '-I$PREFIX/include/freetype2']
+c_args = ['-fpic', '-I$PREFIX/include']
 cpp_args = ['-fpic']
 c_link_args = ['-Wl,-z,max-page-size=16384']
 
@@ -438,8 +285,6 @@ configure_ffmpeg(){
    CLANGXX="${CROSS_PREFIX}clang++"
 
    # Show detected libraries to help ensure they can be enabled
-   echo "freetype2 version: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
-   echo "harfbuzz version: $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
    echo "fribidi version: $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
    echo "libass version: $(pkg-config --modversion libass 2>/dev/null || echo not found)"
 
@@ -458,7 +303,7 @@ configure_ffmpeg(){
    --cxx="$CLANGXX" \
    --sysroot="$SYSROOT" \
    --prefix="$PREFIX" \
-   --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include -I$PREFIX/include/freetype2 " \
+   --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include " \
    --extra-cxxflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -std=c++17 -fexceptions -frtti $EXTRA_CXXFLAGS -I$PREFIX/include " \
    --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL -L$PREFIX/lib" \
    --enable-pic \
@@ -469,23 +314,6 @@ configure_ffmpeg(){
    --ranlib="$LLVM_RANLIB" \
    --strip="$LLVM_STRIP" \
    ${EXTRA_CONFIG} 2>&1 | tee "$CONFIG_SUMMARY_FILE"
-
-   # Verify drawtext and libass got enabled in configure step.
-   if ! (
-        grep -Eq '#define[[:space:]]+CONFIG_DRAWTEXT_FILTER[[:space:]]+1' config.h 2>/dev/null || \
-        grep -Eq '(^|[[:space:]])CONFIG_DRAWTEXT_FILTER[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null || \
-        awk '/^Enabled filters:/{inlist=1;next} /^Enabled /{inlist=0} inlist && $0 ~ /(^|[ ,])drawtext([ ,]|$)/{found=1} END{exit !found}' "$CONFIG_SUMMARY_FILE" 2>/dev/null
-      ); then
-     echo "Error: drawtext filter is NOT enabled. Check freetype2/harfbuzz detection and flags. See config.log for details."
-     echo "Diagnostics:"
-     echo "- freetype2: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
-     echo "- harfbuzz:  $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
-     echo "- Snippet from $CONFIG_SUMMARY_FILE:" && \
-       awk 'p&&!--n; /^Enabled filters:/{p=1;n=60;print;next} p{print}' "$CONFIG_SUMMARY_FILE" 2>/dev/null | sed -n '1,80p' || true
-     echo "- Snippet from config.h:" && grep -E 'CONFIG_(DRAWTEXT_FILTER|LIBFREETYPE|LIBHARFBUZZ)' -n config.h 2>/dev/null || true
-     echo "- Snippet from config.mak:" && grep -E 'CONFIG_(DRAWTEXT_FILTER|LIBFREETYPE|LIBHARFBUZZ)=' -n config.mak 2>/dev/null || true
-     exit 1
-   fi
 
    # Verify libass got enabled
    if ! (
@@ -593,33 +421,21 @@ for ARCH in "${ARCH_LIST[@]}"; do
 	buildLibdav1d "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
 		echo "Error compiling libdav1d for $ARCH"
-  		exit 1
+  	exit 1
 	fi
-	# Build FreeType so ffmpeg's libfreetype and drawtext can link
-	buildFreetype "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
-	if [ $? -ne 0 ]; then
-		echo "Error compiling freetype for $ARCH"
-  	 exit 1
-	fi
-    # Build HarfBuzz so drawtext can be enabled
-    buildHarfBuzz "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
-    if [ $? -ne 0 ]; then
-        echo "Error compiling harfbuzz for $ARCH"
-        exit 1
-    fi
-    # Build FriBidi so libass can be enabled
-    buildFriBiDi "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
-    if [ $? -ne 0 ]; then
-        echo "Error compiling fribidi for $ARCH"
-        exit 1
-    fi
-    # Build libass for Android
-    buildLibass "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
-    if [ $? -ne 0 ]; then
-        echo "Error compiling libass for $ARCH"
-        exit 1
-    fi
-    configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+  # Build FriBidi so libass can be enabled
+  buildFriBiDi "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+  if [ $? -ne 0 ]; then
+    echo "Error compiling fribidi for $ARCH"
+    exit 1
+  fi
+  # Build libass for Android
+  buildLibass "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+  if [ $? -ne 0 ]; then
+    echo "Error compiling libass for $ARCH"
+    exit 1
+  fi
+  configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
 	if [ $? -ne 0 ]; then
 		echo "Error compiling ffmpeg for $ARCH"
   		exit 1
