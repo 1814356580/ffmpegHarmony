@@ -23,7 +23,7 @@ ENABLED_CONFIG="\
   --enable-libass \
   --enable-encoder=h264 \
   --enable-encoder=aac \
-  --enable-encoder=mp4 \
+  --enable-encoder=mpeg4 \
   --enable-decoder=h264 \
   --enable-decoder=mpeg4 \
   --enable-decoder=png \
