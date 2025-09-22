@@ -36,12 +36,12 @@ ENABLED_CONFIG="\
   --enable-decoder=jpeg2000 \
   --enable-decoder=aac \
   --enable-decoder=mp3 \
-  --enable-decoder=assdec \
   --enable-decoder=ass \
   --enable-demuxer=* \
   --enable-muxer=mp4 \
   --enable-muxer=mov \
   --enable-filter=subtitles \
+  --enable-filter=ass \
   --enable-protocol=file \
   --enable-parser=* \
   --enable-bsf=* \
@@ -101,6 +101,8 @@ buildLibdav1d() {
     local EXTRA_CONFIG=$7
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
 
     # 架构名称统一（i686 对应 x86）
     if [ "$TARGET_ARCH" = "i686" ]; then
@@ -157,6 +159,8 @@ EOF
 
     ninja -C build
     ninja -C build install
+
+    cd "$ORIG_PWD"
 }
 
 
@@ -174,6 +178,8 @@ buildFreetype() {
     local EXTRA_CONFIG=$7
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
 
     # 架构名称统一（i686 对应 x86）
     if [ "$TARGET_ARCH" = "i686" ]; then
@@ -237,6 +243,8 @@ EOF
         echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
         exit 1
     fi
+
+    cd "$ORIG_PWD"
 }
 
 
@@ -254,6 +262,8 @@ buildHarfBuzz() {
     local EXTRA_CONFIG=$7
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
 
     # 架构名称统一（i686 对应 x86）
     if [ "$TARGET_ARCH" = "i686" ]; then
@@ -322,6 +332,8 @@ EOF
         echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
         exit 1
     fi
+
+    cd "$ORIG_PWD"
 }
 
 
@@ -339,6 +351,8 @@ buildFriBiDi() {
     local EXTRA_CONFIG=$7
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
 
     # 架构名称统一（i686 对应 x86）
     if [ "$TARGET_ARCH" = "i686" ]; then
@@ -408,7 +422,7 @@ EOF
         echo "Error: fribidi.pc not found in $PREFIX/lib/pkgconfig"
         exit 1
     fi
-    cd ..
+    cd "$ORIG_PWD"
 }
 
 
@@ -426,6 +440,8 @@ buildLibass() {
     local EXTRA_CONFIG=$7
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
 
     # 架构名称统一（i686 对应 x86）
     if [ "$TARGET_ARCH" = "i686" ]; then
@@ -494,7 +510,7 @@ EOF
         echo "Error: libass.pc not found in $PREFIX/lib/pkgconfig"
         exit 1
     fi
-    cd ..
+    cd "$ORIG_PWD"
 }
 
 
@@ -516,6 +532,16 @@ configure_ffmpeg() {
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
+
+    # Correct sysroot lib dir per arch (fixes link errors, esp. arm/armeabi-v7a)
+    local SYSROOT_LIB_DIR=""
+    case "$TARGET_ARCH" in
+        aarch64) SYSROOT_LIB_DIR="$SYSROOT/usr/lib/aarch64-linux-android/$ANDROID_API_LEVEL" ;;
+        arm)     SYSROOT_LIB_DIR="$SYSROOT/usr/lib/arm-linux-androideabi/$ANDROID_API_LEVEL" ;;
+        i686)    SYSROOT_LIB_DIR="$SYSROOT/usr/lib/i686-linux-android/$ANDROID_API_LEVEL" ;;
+        x86_64)  SYSROOT_LIB_DIR="$SYSROOT/usr/lib/x86_64-linux-android/$ANDROID_API_LEVEL" ;;
+        *)       SYSROOT_LIB_DIR="$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL" ;;
+    esac
 
     # 打印依赖库版本（辅助调试）
     echo "freetype2 version: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
@@ -542,7 +568,7 @@ configure_ffmpeg() {
         --prefix="$PREFIX" \
         --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include -I$PREFIX/include/freetype2 -I$PREFIX/include/harfbuzz -I$PREFIX/include/fribidi -I$PREFIX/include/libass " \
         --extra-cxxflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -std=c++17 -fexceptions -frtti $EXTRA_CXXFLAGS -I$PREFIX/include " \
-        --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL -L$PREFIX/lib" \
+        --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT_LIB_DIR -L$PREFIX/lib" \
         --enable-pic \
         ${ENABLED_CONFIG} \
         ${DISABLED_CONFIG} \
