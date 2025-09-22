@@ -37,6 +37,7 @@ ENABLED_CONFIG="\
   --enable-decoder=aac \
   --enable-decoder=mp3 \
   --enable-decoder=assdec \
+  --enable-decoder=ass \
   --enable-demuxer=* \
   --enable-muxer=mp4 \
   --enable-muxer=mov \
