@@ -21,7 +21,10 @@ ENABLED_CONFIG="\
   --enable-swresample \
   --enable-avfilter \
   --enable-libass \
-  --enable-libdav1d
+  --enable-libdav1d \
+  --enable-libfreetype \
+  --enable-libfribidi \
+  --enable-libharfbuzz \
   --enable-encoder=h264 \
   --enable-encoder=aac \
   --enable-encoder=mpeg4 \
