@@ -35,8 +35,8 @@ ENABLED_CONFIG="\
   --enable-muxer=mp4,mov \
   --enable-filter=subtitles \
   --enable-protocol=file \
-  --enable-parser=h264,aac,mpeg4,png,jpeg \
-  --enable-bsf=h264_mp4toannexb,aac_adtstoasc \
+  --enable-parser=* \
+  --enable-bsf=* \
   --enable-small \
   --enable-shared"
 
