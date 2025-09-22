@@ -33,6 +33,7 @@ ENABLED_CONFIG="\
   --enable-decoder=jpeg2000 \
   --enable-decoder=aac \
   --enable-decoder=mp3 \
+  --enable-decoder=assdec \
   --enable-demuxer=* \
   --enable-muxer=mp4 \
   --enable-muxer=mov \
