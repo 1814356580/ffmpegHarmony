@@ -21,6 +21,7 @@ ENABLED_CONFIG="\
   --enable-avutil \
   --enable-swscale \
   --enable-swresample \
+  --enable-aresample \
   --enable-avfilter \
   --enable-libass \
   --enable-libdav1d \
