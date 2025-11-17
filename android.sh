@@ -14,6 +14,8 @@ ARCH_LIST=("armv8a" "armv7a" "x86" "x86-64")
 ##############################################################################
 # 启用的 FFmpeg 模块/功能
 ENABLED_CONFIG="\
+  --enable-gpl \
+  --enable-version3 \
   --enable-avcodec \
   --enable-avformat \
   --enable-avutil \
@@ -26,29 +28,10 @@ ENABLED_CONFIG="\
   --enable-libfribidi \
   --enable-libharfbuzz \
   --enable-libmp3lame \
-  --enable-encoder=h264 \
-  --enable-encoder=aac \
-  --enable-encoder=mpeg4 \
-  --enable-encoder=mp3 \
-  --enable-encoder=pcm_s16le \
-  --enable-decoder=h264 \
-  --enable-decoder=mpeg4 \
-  --enable-decoder=png \
-  --enable-decoder=jpeg \
-  --enable-decoder=jpegls \
-  --enable-decoder=jpeg2000 \
-  --enable-decoder=mjpeg \
-  --enable-decoder=mjpegb \
-  --enable-decoder=aac \
-  --enable-decoder=mp3 \
-  --enable-decoder=ass \
-  --enable-decoder=pcm_s16le \
-  --enable-demuxer=* \
-  --enable-muxer=mp4 \
-  --enable-muxer=mov \
-  --enable-muxer=wav \
-  --enable-muxer=mp3 \
-  --enable-muxer=rawaudio \
+  --enable-muxers \
+  --enable-demuxers \
+  --enable-encoders \
+  --enable-decoders \
   --enable-filter=atempo \
   --enable-filter=subtitles \
   --enable-filter=ass \
