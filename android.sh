@@ -21,7 +21,6 @@ ENABLED_CONFIG="\
   --enable-avutil \
   --enable-swscale \
   --enable-swresample \
-  --enable-aresample \
   --enable-avfilter \
   --enable-libass \
   --enable-libdav1d \
@@ -36,6 +35,7 @@ ENABLED_CONFIG="\
   --enable-filter=atempo \
   --enable-filter=subtitles \
   --enable-filter=ass \
+  --enable-filter=aresample \
   --enable-protocol=file \
   --enable-parser=* \
   --enable-bsf=* \
