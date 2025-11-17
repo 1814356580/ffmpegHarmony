@@ -25,6 +25,7 @@ ENABLED_CONFIG="\
   --enable-libfreetype \
   --enable-libfribidi \
   --enable-libharfbuzz \
+  --enable-libmp3lame \
   --enable-encoder=h264 \
   --enable-encoder=aac \
   --enable-encoder=mpeg4 \
@@ -47,6 +48,8 @@ ENABLED_CONFIG="\
   --enable-muxer=mov \
   --enable-muxer=wav \
   --enable-muxer=mp3 \
+  --enable-muxer=rawaudio \
+  --enable-filter=atempo \
   --enable-filter=subtitles \
   --enable-filter=ass \
   --enable-protocol=file \
@@ -167,7 +170,7 @@ EOF
     ninja -C build
     ninja -C build install
 
-    cd "$ORIG_PWD"
+    cd "$ORIG_PWD" || exit 1
 }
 
 
@@ -247,11 +250,11 @@ EOF
 
     # 验证编译结果（检查 pkg-config 配置文件）
     if [ ! -f "$PREFIX/lib/pkgconfig/freetype2.pc" ]; then
-        echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
-        exit 1
-    fi
+         echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
+         exit 1
+     fi
 
-    cd "$ORIG_PWD"
+    cd "$ORIG_PWD" || exit 1
 }
 
 
@@ -336,11 +339,11 @@ EOF
 
     # 验证编译结果（检查 pkg-config 配置文件）
     if [ ! -f "$PREFIX/lib/pkgconfig/harfbuzz.pc" ]; then
-        echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
-        exit 1
-    fi
+         echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
+         exit 1
+     fi
 
-    cd "$ORIG_PWD"
+    cd "$ORIG_PWD" || exit 1
 }
 
 
@@ -426,10 +429,95 @@ EOF
 
     # 验证编译结果（检查 pkg-config 配置文件）
     if [ ! -f "$PREFIX/lib/pkgconfig/fribidi.pc" ]; then
-        echo "Error: fribidi.pc not found in $PREFIX/lib/pkgconfig"
-        exit 1
+         echo "Error: fribidi.pc not found in $PREFIX/lib/pkgconfig"
+         exit 1
+     fi
+    cd "$ORIG_PWD" || exit 1
+}
+
+
+##############################################################################
+# 编译 LAME（libmp3lame，FFmpeg MP3 编码依赖）
+# 参数说明：同 buildLibdav1d
+##############################################################################
+buildLibmp3lame() {
+    local TARGET_ARCH=$1
+    local TARGET_CPU=$2
+    local PREFIX=$3
+    local CROSS_PREFIX=$4
+    local EXTRA_CFLAGS=$5
+    local EXTRA_CXXFLAGS=$6
+    local EXTRA_CONFIG=$7
+    local CLANG="${CROSS_PREFIX}clang"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
+
+    # 架构名称统一（i686 对应 x86）
+    if [ "$TARGET_ARCH" = "i686" ]; then
+        TARGET_ARCH="x86"
     fi
-    cd "$ORIG_PWD"
+
+    # 克隆/更新 LAME 源码
+    if [ ! -d "lame" ]; then
+        echo "Cloning LAME (libmp3lame)..."
+        git clone https://github.com/rbrito/lame.git lame
+    else
+        echo "Updating LAME (libmp3lame)..."
+        cd lame || exit 1
+        git pull
+        cd ..
+    fi
+
+    cd lame || exit 1
+
+    # 为 Android 交叉编译配置编译环境
+    export CC="$CLANG"
+    export AR="$LLVM_AR"
+    export RANLIB="$LLVM_RANLIB"
+    export STRIP="$LLVM_STRIP"
+    export CFLAGS="-fPIC -DANDROID $EXTRA_CFLAGS --sysroot=$SYSROOT"
+    export LDFLAGS="-fPIC -Wl,-z,max-page-size=16384 -L$PREFIX/lib"
+
+    # 清理旧构建（忽略失败）
+    make distclean >/dev/null 2>&1 || true
+
+    # 注意 host 三元组格式：<arch>-linux-android
+    local HOST_TRIPLE
+    case "$TARGET_ARCH" in
+        aarch64) HOST_TRIPLE="aarch64-linux-android" ;;
+        arm)     HOST_TRIPLE="arm-linux-androideabi" ;;
+        x86_64)  HOST_TRIPLE="x86_64-linux-android" ;;
+        x86)     HOST_TRIPLE="i686-linux-android" ;;
+        *)       HOST_TRIPLE="${TARGET_ARCH}-linux-android" ;;
+    esac
+
+    ./configure \
+        --host="$HOST_TRIPLE" \
+        --disable-frontend \
+        --enable-nasm=no \
+        --enable-static \
+        --disable-shared \
+        --prefix="$PREFIX"
+
+    make -j"$(nproc)"
+    make install -j"$(nproc)"
+
+    # 补充生成 lame.pc，方便 FFmpeg 使用 pkg-config 检测
+    mkdir -p "$PREFIX/lib/pkgconfig"
+    cat > "$PREFIX/lib/pkgconfig/lame.pc" <<EOF
+prefix=$PREFIX
+exec_prefix=\${prefix}
+libdir=\${prefix}/lib
+includedir=\${prefix}/include
+
+Name: lame
+Description: LAME MP3 encoder library
+Version: 3.100
+Libs: -L\${libdir} -lmp3lame
+Cflags: -I\${includedir}
+EOF
+
+    cd "$ORIG_PWD" || exit 1
 }
 
 
@@ -514,10 +602,10 @@ EOF
 
     # 验证编译结果（检查 pkg-config 配置文件）
     if [ ! -f "$PREFIX/lib/pkgconfig/libass.pc" ]; then
-        echo "Error: libass.pc not found in $PREFIX/lib/pkgconfig"
-        exit 1
-    fi
-    cd "$ORIG_PWD"
+         echo "Error: libass.pc not found in $PREFIX/lib/pkgconfig"
+         exit 1
+     fi
+    cd "$ORIG_PWD" || exit 1
 }
 
 
@@ -555,6 +643,7 @@ configure_ffmpeg() {
     echo "harfbuzz version: $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
     echo "fribidi version: $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
     echo "libass version: $(pkg-config --modversion libass 2>/dev/null || echo not found)"
+    echo "lame version: $(pkg-config --modversion lame 2>/dev/null || echo not found)"
 
     # 进入 FFmpeg 源码目录
     cd "$FFMPEG_SOURCE_DIR" || exit 1
@@ -597,6 +686,15 @@ configure_ffmpeg() {
         echo "- Snippet from config.h:" && grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)' -n config.h 2>/dev/null || true
         echo "- Snippet from config.mak:" && grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)=' -n config.mak 2>/dev/null || true
         exit 1
+    fi
+
+    # 可选：检查 libmp3lame 是否启用，若未启用给出提示（但不强制失败）
+    if ! (
+        grep -Eq '#define[[:space:]]+CONFIG_LIBMP3LAME[[:space:]]+1' config.h 2>/dev/null || \
+        grep -Eq '(^|[[:space:]])CONFIG_LIBMP3LAME[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null
+    ); then
+        echo "Warning: libmp3lame is NOT enabled. Check lame detection and config.log for details."
+        grep -E 'CONFIG_LIBMP3LAME' -n config.h config.mak 2>/dev/null || true
     fi
 
     # 编译并安装 FFmpeg（使用所有 CPU 核心加速）
@@ -706,6 +804,9 @@ for ARCH in "${ARCH_LIST[@]}"; do
 
     buildLibass "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
     if [ $? -ne 0 ]; then echo "Error compiling libass for $ARCH"; exit 1; fi
+
+    buildLibmp3lame "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+    if [ $? -ne 0 ]; then echo "Error compiling libmp3lame for $ARCH"; exit 1; fi
 
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
     if [ $? -ne 0 ]; then echo "Error compiling ffmpeg for $ARCH"; exit 1; fi
