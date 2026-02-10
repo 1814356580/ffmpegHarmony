@@ -1,18 +1,27 @@
 #!/bin/bash
+set -euo pipefail
+
+##############################################################################
+# FFmpeg Android 交叉编译脚本
+# 目标平台：Android API 24, arm64-v8a
+# 编译环境：Linux x86_64 (GitHub Actions)
+# 输出：共享库 (.so)
+##############################################################################
+
 
 ##############################################################################
 # 目标 Android 配置信息
 ##############################################################################
 # 目标 Android API 级别
-ANDROID_API_LEVEL="25"
-# 需编译的架构列表（支持：armv8a, armv7a, x86, x86-64）
-ARCH_LIST=("armv8a" "armv7a" "x86" "x86-64")
+ANDROID_API_LEVEL="24"
+# 需编译的架构列表（仅 arm64-v8a）
+ARCH_LIST=("armv8a")
 
 
 ##############################################################################
 # FFmpeg 编译模块配置
 ##############################################################################
-# 启用的 FFmpeg 模块/功能
+# 启用的 FFmpeg 模块/功能（使用 --disable-everything 后显式启用所需组件）
 ENABLED_CONFIG="\
   --enable-gpl \
   --enable-version3 \
@@ -25,25 +34,64 @@ ENABLED_CONFIG="\
   --enable-libass \
   --enable-libdav1d \
   --enable-libfreetype \
-  --enable-libfribidi \
-  --enable-libharfbuzz \
   --enable-libmp3lame \
-  --enable-muxers \
-  --enable-demuxers \
-  --enable-encoders \
-  --enable-decoders \
-  --enable-filter=atempo \
-  --enable-filter=subtitles \
-  --enable-filter=ass \
-  --enable-filter=aresample \
+  --enable-shared \
+  --enable-pic \
   --enable-protocol=file \
-  --enable-parser=* \
-  --enable-bsf=* \
-  --enable-small \
-  --enable-shared"
+  --enable-muxer=mp4 \
+  --enable-muxer=mp3 \
+  --enable-muxer=matroska \
+  --enable-muxer=wav \
+  --enable-muxer=adts \
+  --enable-muxer=ipod \
+  --enable-demuxer=mov \
+  --enable-demuxer=mp3 \
+  --enable-demuxer=matroska \
+  --enable-demuxer=wav \
+  --enable-demuxer=aac \
+  --enable-demuxer=flac \
+  --enable-demuxer=ogg \
+  --enable-decoder=aac \
+  --enable-decoder=mp3 \
+  --enable-decoder=flac \
+  --enable-decoder=opus \
+  --enable-decoder=vorbis \
+  --enable-decoder=pcm_s16le \
+  --enable-decoder=pcm_s24le \
+  --enable-decoder=pcm_f32le \
+  --enable-decoder=h264 \
+  --enable-decoder=hevc \
+  --enable-decoder=av1 \
+  --enable-decoder=libdav1d \
+  --enable-encoder=aac \
+  --enable-encoder=libmp3lame \
+  --enable-encoder=pcm_s16le \
+  --enable-filter=atempo \
+  --enable-filter=aresample \
+  --enable-filter=volume \
+  --enable-filter=afade \
+  --enable-filter=amix \
+  --enable-filter=aformat \
+  --enable-filter=anull \
+  --enable-filter=subtitles \
+  --enable-filter=overlay \
+  --enable-filter=scale \
+  --enable-filter=pad \
+  --enable-filter=rotate \
+  --enable-filter=crop \
+  --enable-filter=color \
+  --enable-filter=nullsink \
+  --enable-parser=aac \
+  --enable-parser=h264 \
+  --enable-parser=hevc \
+  --enable-parser=mpegaudio \
+  --enable-bsf=aac_adtstoasc \
+  --enable-bsf=h264_mp4toannexb \
+  --enable-bsf=hevc_mp4toannexb"
 
 # 禁用的 FFmpeg 模块/功能
 DISABLED_CONFIG="\
+  --disable-everything \
   --disable-small \
   --disable-static \
   --disable-debug \
@@ -75,6 +123,61 @@ export ASFLAGS="-fPIC"
 
 
 ##############################################################################
+# 通用辅助函数：生成 Meson 交叉编译配置文件
+# 参数说明：
+# $1: 输出文件路径
+# $2: C 编译器路径
+# $3: C++ 编译器路径
+# $4: 目标架构（cpu_family）
+# $5: 目标 CPU
+# $6: 额外 c_args（可选）
+# $7: 额外 c_link_args（可选）
+##############################################################################
+generate_meson_cross_file() {
+    local OUTPUT_FILE=$1
+    local CC_PATH=$2
+    local CXX_PATH=$3
+    local CPU_FAMILY=$4
+    local CPU=$5
+    local EXTRA_C_ARGS=${6:-}
+    local EXTRA_C_LINK_ARGS=${7:-}
+
+    local C_ARGS="'-fpic'"
+    if [ -n "$EXTRA_C_ARGS" ]; then
+        C_ARGS="'-fpic', $EXTRA_C_ARGS"
+    fi
+
+    local C_LINK_ARGS=""
+    if [ -n "$EXTRA_C_LINK_ARGS" ]; then
+        C_LINK_ARGS="c_link_args = [$EXTRA_C_LINK_ARGS]"
+    fi
+
+    cat > "$OUTPUT_FILE" <<EOF
+[binaries]
+c = '$CC_PATH'
+cpp = '$CXX_PATH'
+ar = '$LLVM_AR'
+strip = '$LLVM_STRIP'
+pkg-config = 'pkg-config'
+
+[properties]
+needs_exe_wrapper = true
+
+[built-in options]
+c_args = [$C_ARGS]
+cpp_args = ['-fpic']
+${C_LINK_ARGS}
+
+[host_machine]
+system = 'android'
+cpu_family = '$CPU_FAMILY'
+cpu = '$CPU'
+endian = 'little'
+EOF
+}
+
+
+##############################################################################
 # 编译 libdav1d（AV1 视频解码库）
 # 参数说明：
 # $1: 目标架构（TARGET_ARCH）
@@ -98,12 +201,12 @@ buildLibdav1d() {
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
 
-    # 架构名称统一（i686 对应 x86）
+    echo ">>> Building libdav1d for $TARGET_ARCH ..."
+
     if [ "$TARGET_ARCH" = "i686" ]; then
         TARGET_ARCH="x86"
     fi
 
-    # 克隆/更新 libdav1d 源码
     if [ ! -d "dav1d" ]; then
         echo "Cloning libdav1d..."
         git clone https://code.videolan.org/videolan/dav1d.git
@@ -114,47 +217,30 @@ buildLibdav1d() {
         cd ..
     fi
 
-    # 进入源码目录编译
     cd dav1d || exit 1
-    # 生成 Meson 交叉编译配置文件
+
     local CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-    cat > "$CROSS_FILE" <<EOF
-[binaries]
-c = '$CLANG'
-cpp = '$CLANGXX'
-ar = '$LLVM_AR'
-strip = '$LLVM_STRIP'
-pkg-config = 'pkg-config'
-
-[properties]
-needs_exe_wrapper = true
-
-[built-in options]
-c_args = ['-fpic']
-cpp_args = ['-fpic']
-c_link_args = ['-Wl,-z,max-page-size=16384']
-
-[host_machine]
-system = 'android'
-cpu_family = '$TARGET_ARCH'
-cpu = '$TARGET_CPU'
-endian = 'little'
-EOF
+    generate_meson_cross_file "$CROSS_FILE" "$CLANG" "$CLANGXX" "$TARGET_ARCH" "$TARGET_CPU" \
+        "" "'-Wl,-z,max-page-size=16384'"
 
     echo "Meson cross file created: $CROSS_FILE"
-    # 清理旧构建目录
     rm -rf build
-    # Meson 配置 + 编译 + 安装
+
     meson setup build \
         --default-library=static \
-        --prefix=$PREFIX \
+        --prefix="$PREFIX" \
         --buildtype release \
-        --cross-file=$CROSS_FILE
+        --cross-file="$CROSS_FILE"
+    if [ $? -ne 0 ]; then echo "Error: meson setup failed for libdav1d"; return 1; fi
 
     ninja -C build
+    if [ $? -ne 0 ]; then echo "Error: ninja build failed for libdav1d"; return 1; fi
+
     ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja install failed for libdav1d"; return 1; fi
 
     cd "$ORIG_PWD" || exit 1
+    echo ">>> libdav1d build completed."
 }
 
 
@@ -175,12 +261,12 @@ buildFreetype() {
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
 
-    # 架构名称统一（i686 对应 x86）
+    echo ">>> Building FreeType for $TARGET_ARCH ..."
+
     if [ "$TARGET_ARCH" = "i686" ]; then
         TARGET_ARCH="x86"
     fi
 
-    # 克隆/更新 FreeType 源码
     if [ ! -d "freetype2" ]; then
         echo "Cloning FreeType..."
         git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
@@ -191,54 +277,36 @@ buildFreetype() {
         cd ..
     fi
 
-    # 进入源码目录编译
     cd freetype2 || exit 1
-    # 生成 Meson 交叉编译配置文件
+
     local CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-    cat > "$CROSS_FILE" <<EOF
-[binaries]
-c = '$CLANG'
-cpp = '$CLANGXX'
-ar = '$LLVM_AR'
-strip = '$LLVM_STRIP'
-pkg-config = 'pkg-config'
-
-[properties]
-needs_exe_wrapper = true
-
-[built-in options]
-c_args = ['-fpic']
-cpp_args = ['-fpic']
-
-[host_machine]
-system = 'android'
-cpu_family = '$TARGET_ARCH'
-cpu = '$TARGET_CPU'
-endian = 'little'
-EOF
+    generate_meson_cross_file "$CROSS_FILE" "$CLANG" "$CLANGXX" "$TARGET_ARCH" "$TARGET_CPU"
 
     echo "Meson cross file created for freetype: $CROSS_FILE"
-    # 清理旧构建目录
     rm -rf build
-    # Meson 配置（禁用 zlib/png 依赖） + 编译 + 安装
+
     meson setup build \
         --default-library=static \
-        --prefix=$PREFIX \
+        --prefix="$PREFIX" \
         --buildtype release \
-        --cross-file=$CROSS_FILE \
+        --cross-file="$CROSS_FILE" \
         -Dzlib=disabled \
         -Dpng=disabled
+    if [ $? -ne 0 ]; then echo "Error: meson setup failed for freetype"; return 1; fi
 
     ninja -C build
-    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja build failed for freetype"; return 1; fi
 
-    # 验证编译结果（检查 pkg-config 配置文件）
+    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja install failed for freetype"; return 1; fi
+
     if [ ! -f "$PREFIX/lib/pkgconfig/freetype2.pc" ]; then
-         echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
-         exit 1
-     fi
+        echo "Error: freetype2.pc not found in $PREFIX/lib/pkgconfig"
+        return 1
+    fi
 
     cd "$ORIG_PWD" || exit 1
+    echo ">>> FreeType build completed."
 }
 
 
@@ -259,12 +327,12 @@ buildHarfBuzz() {
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
 
-    # 架构名称统一（i686 对应 x86）
+    echo ">>> Building HarfBuzz for $TARGET_ARCH ..."
+
     if [ "$TARGET_ARCH" = "i686" ]; then
         TARGET_ARCH="x86"
     fi
 
-    # 克隆/更新 HarfBuzz 源码
     if [ ! -d "harfbuzz" ]; then
         echo "Cloning HarfBuzz..."
         git clone https://github.com/harfbuzz/harfbuzz.git
@@ -275,41 +343,19 @@ buildHarfBuzz() {
         cd ..
     fi
 
-    # 进入源码目录编译
     cd harfbuzz || exit 1
-    # 生成 Meson 交叉编译配置文件
+
     local CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-    cat > "$CROSS_FILE" <<EOF
-[binaries]
-c = '$CLANG'
-cpp = '$CLANGXX'
-ar = '$LLVM_AR'
-strip = '$LLVM_STRIP'
-pkg-config = 'pkg-config'
-
-[properties]
-needs_exe_wrapper = true
-
-[built-in options]
-c_args = ['-fpic']
-cpp_args = ['-fpic']
-
-[host_machine]
-system = 'android'
-cpu_family = '$TARGET_ARCH'
-cpu = '$TARGET_CPU'
-endian = 'little'
-EOF
+    generate_meson_cross_file "$CROSS_FILE" "$CLANG" "$CLANGXX" "$TARGET_ARCH" "$TARGET_CPU"
 
     echo "Meson cross file created for harfbuzz: $CROSS_FILE"
-    # 清理旧构建目录
     rm -rf build
-    # Meson 配置（禁用冗余依赖） + 编译 + 安装
+
     meson setup build \
         --default-library=static \
-        --prefix=$PREFIX \
+        --prefix="$PREFIX" \
         --buildtype release \
-        --cross-file=$CROSS_FILE \
+        --cross-file="$CROSS_FILE" \
         -Dicu=disabled \
         -Dgraphite2=disabled \
         -Dglib=disabled \
@@ -317,17 +363,21 @@ EOF
         -Dcairo=disabled \
         -Dtests=disabled \
         -Dintrospection=disabled
+    if [ $? -ne 0 ]; then echo "Error: meson setup failed for harfbuzz"; return 1; fi
 
     ninja -C build
-    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja build failed for harfbuzz"; return 1; fi
 
-    # 验证编译结果（检查 pkg-config 配置文件）
+    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja install failed for harfbuzz"; return 1; fi
+
     if [ ! -f "$PREFIX/lib/pkgconfig/harfbuzz.pc" ]; then
-         echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
-         exit 1
-     fi
+        echo "Error: harfbuzz.pc not found in $PREFIX/lib/pkgconfig"
+        return 1
+    fi
 
     cd "$ORIG_PWD" || exit 1
+    echo ">>> HarfBuzz build completed."
 }
 
 
@@ -348,12 +398,12 @@ buildFriBiDi() {
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
 
-    # 架构名称统一（i686 对应 x86）
+    echo ">>> Building FriBiDi for $TARGET_ARCH ..."
+
     if [ "$TARGET_ARCH" = "i686" ]; then
         TARGET_ARCH="x86"
     fi
 
-    # 克隆/更新 FriBidi 源码
     if [ ! -d "fribidi" ]; then
         echo "Cloning FriBidi..."
         git clone https://github.com/fribidi/fribidi.git
@@ -364,59 +414,42 @@ buildFriBiDi() {
         cd ..
     fi
 
-    # 进入源码目录编译
     cd fribidi || exit 1
-    # 生成 Meson 交叉编译配置文件
+
     local CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-    cat > "$CROSS_FILE" <<EOF
-[binaries]
-c = '$CLANG'
-cpp = '$CLANGXX'
-ar = '$LLVM_AR'
-strip = '$LLVM_STRIP'
-pkg-config = 'pkg-config'
-
-[properties]
-needs_exe_wrapper = true
-
-[built-in options]
-c_args = ['-fpic']
-cpp_args = ['-fpic']
-c_link_args = ['-Wl,-z,max-page-size=16384']
-
-[host_machine]
-system = 'android'
-cpu_family = '$TARGET_ARCH'
-cpu = '$TARGET_CPU'
-endian = 'little'
-EOF
+    generate_meson_cross_file "$CROSS_FILE" "$CLANG" "$CLANGXX" "$TARGET_ARCH" "$TARGET_CPU" \
+        "" "'-Wl,-z,max-page-size=16384'"
 
     echo "Meson cross file created for fribidi: $CROSS_FILE"
-    # 配置 pkg-config 路径（用于依赖检测）
+
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-    # 清理旧构建目录
     rm -rf build
-    # Meson 配置（禁用文档/测试） + 编译 + 安装
+
     meson setup build \
         --default-library=static \
-        --prefix=$PREFIX \
+        --prefix="$PREFIX" \
         --buildtype release \
-        --cross-file=$CROSS_FILE \
+        --cross-file="$CROSS_FILE" \
         -Ddocs=false \
         -Dtests=false \
         -Ddeprecated=false
+    if [ $? -ne 0 ]; then echo "Error: meson setup failed for fribidi"; return 1; fi
 
     ninja -C build
-    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja build failed for fribidi"; return 1; fi
 
-    # 验证编译结果（检查 pkg-config 配置文件）
+    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja install failed for fribidi"; return 1; fi
+
     if [ ! -f "$PREFIX/lib/pkgconfig/fribidi.pc" ]; then
-         echo "Error: fribidi.pc not found in $PREFIX/lib/pkgconfig"
-         exit 1
-     fi
+        echo "Error: fribidi.pc not found in $PREFIX/lib/pkgconfig"
+        return 1
+    fi
+
     cd "$ORIG_PWD" || exit 1
+    echo ">>> FriBiDi build completed."
 }
 
 
@@ -436,12 +469,12 @@ buildLibmp3lame() {
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
 
-    # 架构名称统一（i686 对应 x86）
+    echo ">>> Building libmp3lame for $TARGET_ARCH ..."
+
     if [ "$TARGET_ARCH" = "i686" ]; then
         TARGET_ARCH="x86"
     fi
 
-    # 克隆/更新 LAME 源码
     if [ ! -d "lame" ]; then
         echo "Cloning LAME (libmp3lame)..."
         git clone https://github.com/rbrito/lame.git lame
@@ -454,7 +487,6 @@ buildLibmp3lame() {
 
     cd lame || exit 1
 
-    # 为 Android 交叉编译配置编译环境
     export CC="$CLANG"
     export AR="$LLVM_AR"
     export RANLIB="$LLVM_RANLIB"
@@ -462,10 +494,8 @@ buildLibmp3lame() {
     export CFLAGS="-fPIC -DANDROID $EXTRA_CFLAGS --sysroot=$SYSROOT"
     export LDFLAGS="-fPIC -Wl,-z,max-page-size=16384 -L$PREFIX/lib"
 
-    # 清理旧构建（忽略失败）
     make distclean >/dev/null 2>&1 || true
 
-    # 注意 host 三元组格式：<arch>-linux-android
     local HOST_TRIPLE
     case "$TARGET_ARCH" in
         aarch64) HOST_TRIPLE="aarch64-linux-android" ;;
@@ -482,11 +512,14 @@ buildLibmp3lame() {
         --enable-static \
         --disable-shared \
         --prefix="$PREFIX"
+    if [ $? -ne 0 ]; then echo "Error: configure failed for libmp3lame"; return 1; fi
 
     make -j"$(nproc)"
-    make install -j"$(nproc)"
+    if [ $? -ne 0 ]; then echo "Error: make failed for libmp3lame"; return 1; fi
 
-    # 补充生成 lame.pc，方便 FFmpeg 使用 pkg-config 检测
+    make install -j"$(nproc)"
+    if [ $? -ne 0 ]; then echo "Error: make install failed for libmp3lame"; return 1; fi
+
     mkdir -p "$PREFIX/lib/pkgconfig"
     cat > "$PREFIX/lib/pkgconfig/lame.pc" <<EOF
 prefix=$PREFIX
@@ -502,6 +535,7 @@ Cflags: -I\${includedir}
 EOF
 
     cd "$ORIG_PWD" || exit 1
+    echo ">>> libmp3lame build completed."
 }
 
 
@@ -522,12 +556,12 @@ buildLibass() {
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
 
-    # 架构名称统一（i686 对应 x86）
+    echo ">>> Building libass for $TARGET_ARCH ..."
+
     if [ "$TARGET_ARCH" = "i686" ]; then
         TARGET_ARCH="x86"
     fi
 
-    # 克隆/更新 libass 源码
     if [ ! -d "libass" ]; then
         echo "Cloning libass..."
         git clone https://github.com/libass/libass.git
@@ -538,58 +572,42 @@ buildLibass() {
         cd ..
     fi
 
-    # 进入源码目录编译
     cd libass || exit 1
-    # 生成 Meson 交叉编译配置文件（包含依赖头文件路径）
+
     local CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
-    cat > "$CROSS_FILE" <<EOF
-[binaries]
-c = '$CLANG'
-cpp = '$CLANGXX'
-ar = '$LLVM_AR'
-strip = '$LLVM_STRIP'
-pkg-config = 'pkg-config'
-
-[properties]
-needs_exe_wrapper = true
-
-[built-in options]
-c_args = ['-fpic', '-I$PREFIX/include', '-I$PREFIX/include/freetype2', '-I$PREFIX/include/harfbuzz', '-I$PREFIX/include/fribidi']
-cpp_args = ['-fpic']
-c_link_args = ['-Wl,-z,max-page-size=16384']
-
-[host_machine]
-system = 'android'
-cpu_family = '$TARGET_ARCH'
-cpu = '$TARGET_CPU'
-endian = 'little'
-EOF
+    generate_meson_cross_file "$CROSS_FILE" "$CLANG" "$CLANGXX" "$TARGET_ARCH" "$TARGET_CPU" \
+        "'-I$PREFIX/include', '-I$PREFIX/include/freetype2', '-I$PREFIX/include/harfbuzz', '-I$PREFIX/include/fribidi'" \
+        "'-Wl,-z,max-page-size=16384'"
 
     echo "Meson cross file created for libass: $CROSS_FILE"
-    # 配置 pkg-config 路径（用于依赖检测）
+
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
 
-    # 清理旧构建目录
     rm -rf build
-    # Meson 配置（启用 freetype/harfbuzz 依赖） + 编译 + 安装
+
     meson setup build \
         --default-library=static \
-        --prefix=$PREFIX \
+        --prefix="$PREFIX" \
         --buildtype release \
-        --cross-file=$CROSS_FILE \
+        --cross-file="$CROSS_FILE" \
         -Dfontconfig=disabled \
         -Drequire-system-font-provider=false
+    if [ $? -ne 0 ]; then echo "Error: meson setup failed for libass"; return 1; fi
 
     ninja -C build
-    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja build failed for libass"; return 1; fi
 
-    # 验证编译结果（检查 pkg-config 配置文件）
+    ninja -C build install
+    if [ $? -ne 0 ]; then echo "Error: ninja install failed for libass"; return 1; fi
+
     if [ ! -f "$PREFIX/lib/pkgconfig/libass.pc" ]; then
-         echo "Error: libass.pc not found in $PREFIX/lib/pkgconfig"
-         exit 1
-     fi
+        echo "Error: libass.pc not found in $PREFIX/lib/pkgconfig"
+        return 1
+    fi
+
     cd "$ORIG_PWD" || exit 1
+    echo ">>> libass build completed."
 }
 
 
@@ -606,13 +624,11 @@ configure_ffmpeg() {
     local EXTRA_CXXFLAGS=$6
     local EXTRA_CONFIG=$7
 
-    # 配置 pkg-config 路径（用于依赖检测）
     export PKG_CONFIG_PATH="$PREFIX/lib/pkgconfig"
     export PKG_CONFIG_LIBDIR="$PREFIX/lib/pkgconfig"
     local CLANG="${CROSS_PREFIX}clang"
     local CLANGXX="${CROSS_PREFIX}clang++"
 
-    # Correct sysroot lib dir per arch (fixes link errors, esp. arm/armeabi-v7a)
     local SYSROOT_LIB_DIR=""
     case "$TARGET_ARCH" in
         aarch64) SYSROOT_LIB_DIR="$SYSROOT/usr/lib/aarch64-linux-android/$ANDROID_API_LEVEL" ;;
@@ -622,23 +638,23 @@ configure_ffmpeg() {
         *)       SYSROOT_LIB_DIR="$SYSROOT/usr/lib/$TARGET_ARCH-linux-android/$ANDROID_API_LEVEL" ;;
     esac
 
-    # 打印依赖库版本（辅助调试）
-    echo "freetype2 version: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
-    echo "harfbuzz version: $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
-    echo "fribidi version: $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
-    echo "libass version: $(pkg-config --modversion libass 2>/dev/null || echo not found)"
-    echo "lame version: $(pkg-config --modversion lame 2>/dev/null || echo not found)"
+    echo "=== Dependency versions ==="
+    echo "freetype2: $(pkg-config --modversion freetype2 2>/dev/null || echo not found)"
+    echo "harfbuzz:  $(pkg-config --modversion harfbuzz 2>/dev/null || echo not found)"
+    echo "fribidi:   $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
+    echo "libass:    $(pkg-config --modversion libass 2>/dev/null || echo not found)"
+    echo "lame:      $(pkg-config --modversion lame 2>/dev/null || echo not found)"
+    echo "dav1d:     $(pkg-config --modversion dav1d 2>/dev/null || echo not found)"
 
-    # 进入 FFmpeg 源码目录
     cd "$FFMPEG_SOURCE_DIR" || exit 1
-    # 生成配置摘要文件（用于调试）
+
     local CONFIG_SUMMARY_FILE="configure.summary.$TARGET_ARCH.txt"
-    # FFmpeg 配置（核心参数）
+
     ./configure \
         --disable-everything \
         --target-os=android \
-        --arch=$TARGET_ARCH \
-        --cpu=$TARGET_CPU \
+        --arch="$TARGET_ARCH" \
+        --cpu="$TARGET_CPU" \
         --pkg-config=pkg-config \
         --enable-cross-compile \
         --cross-prefix="$CROSS_PREFIX" \
@@ -646,9 +662,9 @@ configure_ffmpeg() {
         --cxx="$CLANGXX" \
         --sysroot="$SYSROOT" \
         --prefix="$PREFIX" \
-        --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include -I$PREFIX/include/freetype2 -I$PREFIX/include/harfbuzz -I$PREFIX/include/fribidi -I$PREFIX/include/libass " \
-        --extra-cxxflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -std=c++17 -fexceptions -frtti $EXTRA_CXXFLAGS -I$PREFIX/include " \
-        --extra-ldflags=" -Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT_LIB_DIR -L$PREFIX/lib" \
+        --extra-cflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security $EXTRA_CFLAGS -I$PREFIX/include -I$PREFIX/include/freetype2 -I$PREFIX/include/harfbuzz -I$PREFIX/include/fribidi -I$PREFIX/include/libass" \
+        --extra-cxxflags="-fpic -DANDROID -fdata-sections -ffunction-sections -funwind-tables -fstack-protector-strong -no-canonical-prefixes -D__BIONIC_NO_PAGE_SIZE_MACRO -D_FORTIFY_SOURCE=2 -Wformat -Werror=format-security -std=c++17 -fexceptions -frtti $EXTRA_CXXFLAGS -I$PREFIX/include" \
+        --extra-ldflags="-Wl,-z,max-page-size=16384 -Wl,--build-id=sha1 -Wl,--no-rosegment -Wl,--no-undefined-version -Wl,--fatal-warnings -Wl,--no-undefined -Qunused-arguments -L$SYSROOT_LIB_DIR -L$PREFIX/lib" \
         --enable-pic \
         ${ENABLED_CONFIG} \
         ${DISABLED_CONFIG} \
@@ -667,12 +683,11 @@ configure_ffmpeg() {
         echo "Diagnostics:"
         echo "- fribidi: $(pkg-config --modversion fribidi 2>/dev/null || echo not found)"
         echo "- libass:  $(pkg-config --modversion libass 2>/dev/null || echo not found)"
-        echo "- Snippet from config.h:" && grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)' -n config.h 2>/dev/null || true
-        echo "- Snippet from config.mak:" && grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)=' -n config.mak 2>/dev/null || true
+        grep -E 'CONFIG_(LIBASS|LIBFRIBIDI)' -n config.h config.mak 2>/dev/null || true
         exit 1
     fi
 
-    # 可选：检查 libmp3lame 是否启用，若未启用给出提示（但不强制失败）
+    # 检查 libmp3lame 是否启用
     if ! (
         grep -Eq '#define[[:space:]]+CONFIG_LIBMP3LAME[[:space:]]+1' config.h 2>/dev/null || \
         grep -Eq '(^|[[:space:]])CONFIG_LIBMP3LAME[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null
@@ -681,17 +696,18 @@ configure_ffmpeg() {
         grep -E 'CONFIG_LIBMP3LAME' -n config.h config.mak 2>/dev/null || true
     fi
 
-    # 编译并安装 FFmpeg（使用所有 CPU 核心加速）
     make clean
     make -j"$(nproc)"
     make install -j"$(nproc)"
+
+    echo ">>> FFmpeg build completed for $TARGET_ARCH."
 }
 
 
 ##############################################################################
 # 主执行逻辑
 ##############################################################################
-echo -e "\e[1;32mCompiling FFMPEG for Android...\e[0m"
+echo -e "\e[1;32mCompiling FFmpeg for Android...\e[0m"
 
 # 检查必要环境变量
 if [ -z "$FFMPEG_SOURCE_DIR" ]; then
@@ -705,7 +721,7 @@ if [ -z "$ANDROID_NDK_PATH" ]; then
 fi
 
 # 设置默认编译输出目录
-if [ -z "$FFMPEG_BUILD_DIR" ]; then
+if [ -z "${FFMPEG_BUILD_DIR:-}" ]; then
     FFMPEG_BUILD_DIR="$(pwd)"
     export FFMPEG_BUILD_DIR
     echo "FFMPEG_BUILD_DIR not set; defaulting to $(pwd)"
@@ -714,7 +730,6 @@ fi
 # 遍历架构列表，逐架构编译依赖库 + FFmpeg
 for ARCH in "${ARCH_LIST[@]}"; do
     case "$ARCH" in
-        # 64位 ARM 架构（armv8a/arm64-v8a）
         "armv8-a"|"aarch64"|"arm64-v8a"|"armv8a")
             echo -e "\e[1;32m=== Building for $ARCH ===\e[0m"
             TARGET_ARCH="aarch64"
@@ -727,48 +742,8 @@ for ARCH in "${ARCH_LIST[@]}"; do
             EXTRA_CONFIG="--enable-asm --enable-neon"
             ;;
 
-        # 32位 ARM 架构（armv7a/armeabi-v7a）
-        "armv7-a"|"armeabi-v7a"|"armv7a")
-            echo -e "\e[1;32m=== Building for $ARCH ===\e[0m"
-            TARGET_ARCH="arm"
-            TARGET_CPU="armv7-a"
-            TARGET_ABI="armv7a"
-            PREFIX="${FFMPEG_BUILD_DIR}/$ANDROID_API_LEVEL/armeabi-v7a"
-            CROSS_PREFIX="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/$TARGET_ABI-linux-androideabi${ANDROID_API_LEVEL}-"
-            EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -mfpu=neon -fomit-frame-pointer"
-            EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -mfpu=neon -fomit-frame-pointer"
-            EXTRA_CONFIG="--disable-armv5te --disable-armv6 --disable-armv6t2 --enable-asm --enable-neon"
-            ;;
-
-        # 64位 x86 架构（x86-64/x86_64）
-        "x86-64"|"x86_64")
-            echo -e "\e[1;32m=== Building for $ARCH ===\e[0m"
-            TARGET_ARCH="x86_64"
-            TARGET_CPU="x86-64"
-            TARGET_ABI="x86_64"
-            PREFIX="${FFMPEG_BUILD_DIR}/$ANDROID_API_LEVEL/x86_64"
-            CROSS_PREFIX="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/$TARGET_ABI-linux-android${ANDROID_API_LEVEL}-"
-            EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
-            EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
-            EXTRA_CONFIG="--enable-asm"
-            ;;
-
-        # 32位 x86 架构（x86/i686）
-        "x86"|"i686")
-            echo -e "\e[1;32m=== Building for $ARCH ===\e[0m"
-            TARGET_ARCH="i686"
-            TARGET_CPU="i686"
-            TARGET_ABI="i686"
-            PREFIX="${FFMPEG_BUILD_DIR}/$ANDROID_API_LEVEL/x86"
-            CROSS_PREFIX="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/$TARGET_ABI-linux-android${ANDROID_API_LEVEL}-"
-            EXTRA_CFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
-            EXTRA_CXXFLAGS="-O2 -march=$TARGET_CPU -fomit-frame-pointer"
-            EXTRA_CONFIG="--disable-asm"
-            ;;
-
-        # 未知架构处理
         *)
-            echo "Error: Unknown architecture: $ARCH"
+            echo "Error: Unknown or unsupported architecture: $ARCH"
             exit 1
             ;;
     esac
