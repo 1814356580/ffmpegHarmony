@@ -344,6 +344,14 @@ buildHarfBuzz() {
 
     cd harfbuzz || exit 1
 
+    # localeconv_l 在 Android Bionic API < 26 中不可用，替换为 localeconv()
+    # SVG 路径解析始终使用 '.' 作为小数点，C locale 语义等效
+    local SVG_UTILS="src/hb-vector-svg-utils.cc"
+    if [ -f "$SVG_UTILS" ]; then
+        echo "Patching $SVG_UTILS for Android API $ANDROID_API_LEVEL (localeconv_l unavailable in Bionic)..."
+        sed -i 's/localeconv_l ([^)]*)/localeconv ()/g' "$SVG_UTILS"
+    fi
+
     local CROSS_FILE="android-$TARGET_ARCH-$ANDROID_API_LEVEL-cross.meson"
     generate_meson_cross_file "$CROSS_FILE" "$CLANG" "$CLANGXX" "$TARGET_ARCH" "$TARGET_CPU"
 
