@@ -89,9 +89,8 @@ ENABLED_CONFIG="\
   --enable-bsf=h264_mp4toannexb \
   --enable-bsf=hevc_mp4toannexb"
 
-# 禁用的 FFmpeg 模块/功能
+# 禁用的 FFmpeg 模块/功能（不在此处重复 --disable-everything，configure_ffmpeg 已显式传入）
 DISABLED_CONFIG="\
-  --disable-everything \
   --disable-small \
   --disable-static \
   --disable-debug \
