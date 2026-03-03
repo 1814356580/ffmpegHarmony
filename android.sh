@@ -66,6 +66,8 @@ ENABLED_CONFIG="\
   --enable-encoder=aac \
   --enable-encoder=libmp3lame \
   --enable-encoder=pcm_s16le \
+  --enable-libx264 \
+  --enable-encoder=libx264 \
   --enable-filter=atempo \
   --enable-filter=aresample \
   --enable-filter=volume \
@@ -547,6 +549,75 @@ EOF
 
 
 ##############################################################################
+# 编译 libx264（H.264 视频编码库，GPLv2+）
+# 参数说明：同 buildLibdav1d
+##############################################################################
+buildLibx264() {
+    local TARGET_ARCH=$1
+    local TARGET_CPU=$2
+    local PREFIX=$3
+    local CROSS_PREFIX=$4
+    local EXTRA_CFLAGS=$5
+    local EXTRA_CXXFLAGS=$6
+    local EXTRA_CONFIG=$7
+    local CLANG="${CROSS_PREFIX}clang"
+    local ORIG_PWD
+    ORIG_PWD="$(pwd)"
+
+    echo ">>> Building libx264 for $TARGET_ARCH ..."
+
+    if [ ! -d "x264" ]; then
+        echo "Cloning x264..."
+        git clone https://code.videolan.org/videolan/x264.git
+    else
+        echo "Updating x264..."
+        cd x264 || exit 1
+        git pull
+        cd ..
+    fi
+
+    cd x264 || exit 1
+
+    export CC="$CLANG"
+    export AR="$LLVM_AR"
+    export RANLIB="$LLVM_RANLIB"
+    export STRIP="$LLVM_STRIP"
+    export CFLAGS="-fPIC -DANDROID $EXTRA_CFLAGS --sysroot=$SYSROOT"
+    export LDFLAGS="-fPIC -Wl,-z,max-page-size=16384 -L$PREFIX/lib"
+
+    local HOST_TRIPLE
+    case "$TARGET_ARCH" in
+        aarch64) HOST_TRIPLE="aarch64-linux-android" ;;
+        arm)     HOST_TRIPLE="arm-linux-androideabi" ;;
+        x86_64)  HOST_TRIPLE="x86_64-linux-android" ;;
+        i686)    HOST_TRIPLE="i686-linux-android" ;;
+        *)       HOST_TRIPLE="${TARGET_ARCH}-linux-android" ;;
+    esac
+
+    ./configure \
+        --host="$HOST_TRIPLE" \
+        --cross-prefix="$CROSS_PREFIX" \
+        --sysroot="$SYSROOT" \
+        --prefix="$PREFIX" \
+        --enable-static \
+        --disable-shared \
+        --disable-cli \
+        --disable-opencl \
+        --enable-pic
+    if [ $? -ne 0 ]; then echo "Error: configure failed for libx264"; return 1; fi
+
+    make -j"$(nproc)"
+    if [ $? -ne 0 ]; then echo "Error: make failed for libx264"; return 1; fi
+
+    make install -j"$(nproc)"
+    if [ $? -ne 0 ]; then echo "Error: make install failed for libx264"; return 1; fi
+
+    cd "$ORIG_PWD" || exit 1
+    echo ">>> libx264 build completed."
+}
+
+
+##############################################################################
 # 编译 libass（字幕渲染库，FFmpeg subtitles 滤镜依赖）
 # 参数说明：同 buildLibdav1d
 ##############################################################################
@@ -652,6 +723,7 @@ configure_ffmpeg() {
     echo "libass:    $(pkg-config --modversion libass 2>/dev/null || echo not found)"
     echo "lame:      $(pkg-config --modversion lame 2>/dev/null || echo not found)"
     echo "dav1d:     $(pkg-config --modversion dav1d 2>/dev/null || echo not found)"
+    echo "x264:      $(pkg-config --modversion x264 2>/dev/null || echo not found)"
 
     cd "$FFMPEG_SOURCE_DIR" || exit 1
 
@@ -701,6 +773,18 @@ configure_ffmpeg() {
     ); then
         echo "Warning: libmp3lame is NOT enabled. Check lame detection and config.log for details."
         grep -E 'CONFIG_LIBMP3LAME' -n config.h config.mak 2>/dev/null || true
+    fi
+
+    # 检查 libx264 是否启用（视频编码核心依赖）
+    if ! (
+        grep -Eq '#define[[:space:]]+CONFIG_LIBX264[[:space:]]+1' config.h 2>/dev/null || \
+        grep -Eq '(^|[[:space:]])CONFIG_LIBX264[[:space:]]*=[[:space:]]*yes([[:space:]]|$)' config.mak 2>/dev/null
+    ); then
+        echo "Error: libx264 is NOT enabled. PipelineB (MV Creator) requires H.264 encoding."
+        echo "Diagnostics:"
+        echo "- x264: $(pkg-config --modversion x264 2>/dev/null || echo not found)"
+        grep -E 'CONFIG_LIBX264' -n config.h config.mak 2>/dev/null || true
+        exit 1
     fi
 
     make clean
@@ -773,6 +857,9 @@ for ARCH in "${ARCH_LIST[@]}"; do
 
     buildLibmp3lame "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
     if [ $? -ne 0 ]; then echo "Error compiling libmp3lame for $ARCH"; exit 1; fi
+
+    buildLibx264 "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
+    if [ $? -ne 0 ]; then echo "Error compiling libx264 for $ARCH"; exit 1; fi
 
     configure_ffmpeg "$TARGET_ARCH" "$TARGET_CPU" "$PREFIX" "$CROSS_PREFIX" "$EXTRA_CFLAGS" "$EXTRA_CXXFLAGS" "$EXTRA_CONFIG"
     if [ $? -ne 0 ]; then echo "Error compiling ffmpeg for $ARCH"; exit 1; fi
