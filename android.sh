@@ -118,6 +118,7 @@ LLVM_AR="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
 LLVM_NM="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-nm"
 LLVM_RANLIB="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ranlib"
 LLVM_STRIP="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip"
+LLVM_STRINGS="$ANDROID_NDK_PATH/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strings"
 
 # 导出汇编器 flags（Position-Independent Code）
 export ASFLAGS="-fPIC"
@@ -582,6 +583,8 @@ buildLibx264() {
     export AR="$LLVM_AR"
     export RANLIB="$LLVM_RANLIB"
     export STRIP="$LLVM_STRIP"
+    # NDK r23+ 移除了 binutils 的 strings 工具，x264 configure 依赖 $STRINGS 检测字节序
+    export STRINGS="$LLVM_STRINGS"
     export CFLAGS="-fPIC -DANDROID $EXTRA_CFLAGS --sysroot=$SYSROOT"
     export LDFLAGS="-fPIC -Wl,-z,max-page-size=16384 -L$PREFIX/lib"
 
