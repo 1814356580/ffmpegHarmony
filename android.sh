@@ -25,6 +25,9 @@ ARCH_LIST=("armv8a")
 ENABLED_CONFIG="\
   --enable-gpl \
   --enable-version3 \
+  --enable-jni \
+  --enable-mediacodec \
+  --enable-encoder=h264_mediacodec \
   --enable-avcodec \
   --enable-avformat \
   --enable-avutil \
