@@ -77,6 +77,7 @@ ENABLED_CONFIG="\
   --enable-encoder=pcm_s16le \
   --enable-libx264 \
   --enable-encoder=libx264 \
+  --enable-filter=setpts \
   --enable-filter=atempo \
   --enable-filter=aresample \
   --enable-filter=volume \
