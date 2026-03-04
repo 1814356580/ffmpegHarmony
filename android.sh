@@ -102,7 +102,9 @@ ENABLED_CONFIG="\
   --enable-bsf=aac_adtstoasc \
   --enable-bsf=h264_mp4toannexb \
   --enable-bsf=hevc_mp4toannexb \
-  --enable-bsf=extract_extradata"
+  --enable-bsf=extract_extradata \
+  --enable-bsf=h264_metadata \
+  --enable-bsf=hevc_metadata"
 
 # 禁用的 FFmpeg 模块/功能（不在此处重复 --disable-everything，configure_ffmpeg 已显式传入）
 DISABLED_CONFIG="\
