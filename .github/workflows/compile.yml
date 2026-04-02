@@ -1,61 +1,86 @@
-name: Build FFmpeg for Android
+name: 编译 FFmpeg 鸿蒙 Next SO库
+run-name: FFmpeg-OHOS-Next 编译任务
 
+# 触发条件：手动触发（推荐）/ 推送代码触发
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch:  # 手动触发（核心！直接在GitHub页面点一下就编译）
 
 jobs:
-  build:
+  build-ffmpeg-ohos:
+    # 关键：用Ubuntu Linux云环境编译（Windows无法编译so）
     runs-on: ubuntu-latest
-
-    env:
-      NDK_VERSION: r28c
-
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      # 步骤1：检出仓库代码
+      - name: 检出代码
+        uses: actions/checkout@v4
 
-    - name: Install build tools and Yasm
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y build-essential meson ninja-build nasm pkg-config autoconf
+      # 步骤2：安装编译依赖（git/wget/make等基础工具）
+      - name: 安装系统依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y make git wget unzip zip build-essential
 
-    - name: Set up Android NDK
-      id: setup-ndk
-      uses: nttld/setup-ndk@v1
-      with:
-        ndk-version: ${{ env.NDK_VERSION }}
-        add-to-path: true
+      # 步骤3：下载 鸿蒙Next 官方NDK（交叉编译工具链）
+      - name: 下载鸿蒙NDK
+        run: |
+          wget https://repo.huaweicloud.com/harmonyos/ohos-sdk/5.0.0.100/Native/ohos-ndk-5.0.0.100-linux-x86_64.zip -O ohos-ndk.zip
+          unzip -q ohos-ndk.zip -d $GITHUB_WORKSPACE/ohos-ndk
+          # 授权NDK工具执行权限
+          chmod -R +x $GITHUB_WORKSPACE/ohos-ndk
 
-    - name: Set environment variables
-      run: |
-        echo "ANDROID_NDK_PATH=${ANDROID_NDK_HOME}" >> $GITHUB_ENV
+      # 步骤4：拉取FFmpeg稳定源码（5.1版本，兼容鸿蒙）
+      - name: 拉取FFmpeg源码
+        run: |
+          git clone https://github.com/FFmpeg/FFmpeg.git --depth 1 -b n5.1 ffmpeg
+          cd ffmpeg
 
-    - name: Make .sh files executable
-      run: |
-        chmod +x ./android.sh
-      
-    - name: Clone latest FFmpeg
-      run: |
-        git clone https://github.com/FFmpeg/FFmpeg.git ffmpeg
-        echo "FFMPEG_SOURCE_DIR=$GITHUB_WORKSPACE/ffmpeg" >> $GITHUB_ENV
+      # 步骤5：配置FFmpeg交叉编译（鸿蒙Next核心参数）
+      - name: 配置FFmpeg编译参数
+        run: |
+          cd ffmpeg
+          # 鸿蒙NDK路径变量
+          NDK_ROOT=$GITHUB_WORKSPACE/ohos-ndk
+          SYSROOT=$NDK_ROOT/sysroot
+          TOOLCHAIN=$NDK_ROOT/toolchains/llvm-prebuilt/linux-x86_64/bin
+          # 交叉编译目标：鸿蒙ARM64
+          TARGET=aarch64-linux-ohos
+          
+          # FFmpeg核心配置（仅编译SO库，禁用无用功能）
+          ./configure \
+            --prefix=$GITHUB_WORKSPACE/ffmpeg-output \
+            --target-os=linux \
+            --arch=aarch64 \
+            --cross-prefix=$TOOLCHAIN/$TARGET- \
+            --cc=$TOOLCHAIN/clang \
+            --cxx=$TOOLCHAIN/clang++ \
+            --sysroot=$SYSROOT \
+            --enable-shared \
+            --disable-static \
+            --disable-doc \
+            --disable-programs \
+            --disable-avdevice \
+            --disable-network
 
-    - name: Create build directory
-      run: |
-        mkdir -p ffmpeg-build
-        echo "FFMPEG_BUILD_DIR=$GITHUB_WORKSPACE/ffmpeg-build" >> $GITHUB_ENV
+      # 步骤6：开始编译（4线程加速）
+      - name: 编译FFmpeg
+        run: |
+          cd ffmpeg
+          make -j4
 
-    - name: Run build script
-      run: |
-        set -e
-        ./android.sh
+      # 步骤7：安装编译产物（提取SO库和头文件）
+      - name: 提取编译产物
+        run: |
+          cd ffmpeg
+          make install
 
+      # 步骤8：打包产物
+      - name: 打包SO库和头文件
+        run: |
+          zip -r ffmpeg-ohos-next.zip $GITHUB_WORKSPACE/ffmpeg-output
 
-    - name: Upload FFmpeg build artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: ffmpeg-android-build
-        path: ffmpeg-build/
+      # 步骤9：上传编译产物（GitHub Actions可直接下载）
+      - name: 上传编译结果
+        uses: actions/upload-artifact@v4
+        with:
+          name: ffmpeg-ohos-next-so
+          path: ffmpeg-ohos-next.zip
