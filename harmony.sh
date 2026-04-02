@@ -161,6 +161,25 @@ ensure_git_repo() {
     git_refresh_repo "$REPO_DIR"
 }
 
+get_autotools_host() {
+    local TARGET_ARCH=$1
+
+    case "$TARGET_ARCH" in
+        aarch64)
+            printf '%s\n' "aarch64-unknown-linux-gnu"
+            ;;
+        arm)
+            printf '%s\n' "arm-linux-gnueabihf"
+            ;;
+        x86_64)
+            printf '%s\n' "x86_64-unknown-linux-gnu"
+            ;;
+        *)
+            printf '%s\n' "$TARGET_ARCH-linux-gnu"
+            ;;
+    esac
+}
+
 find_latest_ohos_native_sdk() {
     local BASE_DIR=${1:-}
     local CANDIDATE=""
@@ -476,9 +495,11 @@ buildLibmp3lame() {
     local EXTRA_CXXFLAGS=$6
     local EXTRA_CONFIG=$7
     local TARGET_TRIPLE=$8
+    local AUTOTOOLS_HOST
     local CLANG="${CLANG_PREFIX}clang"
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
+    AUTOTOOLS_HOST=$(get_autotools_host "$TARGET_ARCH")
 
     echo ">>> Building libmp3lame for $TARGET_ARCH ..."
 
@@ -496,7 +517,7 @@ buildLibmp3lame() {
     make distclean >/dev/null 2>&1 || true
 
     ./configure \
-        --host="$TARGET_TRIPLE" \
+        --host="$AUTOTOOLS_HOST" \
         --disable-frontend \
         --enable-nasm=no \
         --enable-static \
@@ -532,9 +553,11 @@ buildLibx264() {
     local EXTRA_CXXFLAGS=$6
     local EXTRA_CONFIG=$7
     local TARGET_TRIPLE=$8
+    local AUTOTOOLS_HOST
     local CLANG="${CLANG_PREFIX}clang"
     local ORIG_PWD
     ORIG_PWD="$(pwd)"
+    AUTOTOOLS_HOST=$(get_autotools_host "$TARGET_ARCH")
 
     echo ">>> Building libx264 for $TARGET_ARCH ..."
 
@@ -551,7 +574,7 @@ buildLibx264() {
     export LDFLAGS="-fPIC -fuse-ld=lld --rtlib=compiler-rt -Wl,--gc-sections -Wl,-z,noexecstack -L$PREFIX/lib"
 
     ./configure \
-        --host="$TARGET_TRIPLE" \
+        --host="$AUTOTOOLS_HOST" \
         --prefix="$PREFIX" \
         --enable-static \
         --disable-shared \
