@@ -20,23 +20,34 @@ Run:
 bash harmony.sh
 ```
 
-Or run it from PowerShell on Windows:
-
-```powershell
-.\run-harmony.ps1 -FfmpegSourceDir D:\path\to\ffmpeg
-```
-
-Optional parameters:
-
-```powershell
-.\run-harmony.ps1 `
-  -FfmpegSourceDir D:\path\to\ffmpeg `
-  -OhosNativeSdkPath D:\Harmony\sdk\12\native `
-  -BuildDir D:\Test\ffmpegHarmony\build-ohos `
-  -BashExe D:\Git\Git\bin\bash.exe
-```
-
 The current default target is `arm64-v8a`, and the output will be placed under `build-ohos/arm64-v8a` when `FFMPEG_BUILD_DIR` is not provided.
+
+To build more than one ABI, set `OHOS_ARCH_LIST` before running the script:
+
+```bash
+export OHOS_ARCH_LIST="arm64-v8a,armeabi-v7a,x86_64"
+bash harmony.sh
+```
+
+### GitHub Actions
+
+The repository includes [`.github/workflows/compile.yml`](./.github/workflows/compile.yml), which downloads the official HarmonyOS SDK package from Huawei Cloud, extracts the Native SDK, builds FFmpeg with `harmony.sh`, and uploads the generated libraries as an artifact.
+
+The workflow is manual by default (`workflow_dispatch`) and accepts:
+
+- `ffmpeg_ref`: FFmpeg tag or branch to build, default `n7.1`
+- `ohos_sdk_url`: official HarmonyOS SDK package URL
+- `archs`: target ABIs, comma-separated, default `arm64-v8a`
+
+The main CI environment variables are:
+
+```bash
+FFMPEG_SOURCE_DIR=$GITHUB_WORKSPACE/ffmpeg
+FFMPEG_BUILD_DIR=$GITHUB_WORKSPACE/build-ohos
+OHOS_NATIVE_SDK_PATH=<extracted native sdk path>
+OHOS_ARCH_LIST=arm64-v8a
+FFMPEG_SKIP_DEP_UPDATES=1
+```
 
 ## For Step By Step tutorial Read this Article ([Compile FFMPEG For Android](https://umirtech.com/how-to-compile-build-ffmpeg-for-android-and-use-it-in-android-studio/))
 

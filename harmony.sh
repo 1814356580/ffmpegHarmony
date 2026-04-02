@@ -7,7 +7,26 @@ set -euo pipefail
 # Output type: shared libraries (.so)
 ##############################################################################
 
-OHOS_ARCH_LIST=("arm64-v8a")
+DEFAULT_OHOS_ARCH_LIST=("arm64-v8a")
+
+parse_arch_list() {
+    local RAW_ARCH_LIST=${OHOS_ARCH_LIST:-}
+    local -a PARSED_ARCH_LIST=()
+    local ARCH=""
+
+    if [ -z "$RAW_ARCH_LIST" ]; then
+        printf '%s\n' "${DEFAULT_OHOS_ARCH_LIST[@]}"
+        return 0
+    fi
+
+    RAW_ARCH_LIST=${RAW_ARCH_LIST//,/ }
+    # shellcheck disable=SC2206
+    PARSED_ARCH_LIST=($RAW_ARCH_LIST)
+
+    for ARCH in "${PARSED_ARCH_LIST[@]}"; do
+        [ -n "$ARCH" ] && printf '%s\n' "$ARCH"
+    done
+}
 
 ENABLED_CONFIG="\
   --enable-gpl \
@@ -115,6 +134,31 @@ normalize_path() {
     else
         printf '%s\n' "${RAW_PATH//\\//}"
     fi
+}
+
+git_refresh_repo() {
+    local REPO_DIR=$1
+
+    if [ "${FFMPEG_SKIP_DEP_UPDATES:-0}" = "1" ] || [ -n "${CI:-}" ]; then
+        return 0
+    fi
+
+    (
+        cd "$REPO_DIR" || exit 1
+        git pull --ff-only
+    )
+}
+
+ensure_git_repo() {
+    local REPO_DIR=$1
+    local REPO_URL=$2
+
+    if [ ! -d "$REPO_DIR/.git" ]; then
+        git clone --depth 1 "$REPO_URL" "$REPO_DIR"
+        return 0
+    fi
+
+    git_refresh_repo "$REPO_DIR"
 }
 
 find_latest_ohos_native_sdk() {
@@ -236,13 +280,7 @@ buildLibdav1d() {
 
     echo ">>> Building libdav1d for $TARGET_ARCH ..."
 
-    if [ ! -d "dav1d" ]; then
-        git clone https://code.videolan.org/videolan/dav1d.git
-    else
-        cd dav1d || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "dav1d" "https://code.videolan.org/videolan/dav1d.git"
 
     cd dav1d || exit 1
     rm -rf build
@@ -289,13 +327,7 @@ buildFreetype() {
 
     echo ">>> Building FreeType for $TARGET_ARCH ..."
 
-    if [ ! -d "freetype2" ]; then
-        git clone https://git.savannah.gnu.org/git/freetype/freetype2.git
-    else
-        cd freetype2 || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "freetype2" "https://git.savannah.gnu.org/git/freetype/freetype2.git"
 
     cd freetype2 || exit 1
     rm -rf build
@@ -344,13 +376,7 @@ buildHarfBuzz() {
 
     echo ">>> Building HarfBuzz for $TARGET_ARCH ..."
 
-    if [ ! -d "harfbuzz" ]; then
-        git clone https://github.com/harfbuzz/harfbuzz.git
-    else
-        cd harfbuzz || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "harfbuzz" "https://github.com/harfbuzz/harfbuzz.git"
 
     cd harfbuzz || exit 1
     rm -rf build
@@ -404,13 +430,7 @@ buildFriBiDi() {
 
     echo ">>> Building FriBiDi for $TARGET_ARCH ..."
 
-    if [ ! -d "fribidi" ]; then
-        git clone https://github.com/fribidi/fribidi.git
-    else
-        cd fribidi || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "fribidi" "https://github.com/fribidi/fribidi.git"
 
     cd fribidi || exit 1
     rm -rf build
@@ -462,13 +482,7 @@ buildLibmp3lame() {
 
     echo ">>> Building libmp3lame for $TARGET_ARCH ..."
 
-    if [ ! -d "lame" ]; then
-        git clone https://github.com/rbrito/lame.git lame
-    else
-        cd lame || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "lame" "https://github.com/rbrito/lame.git"
 
     cd lame || exit 1
 
@@ -524,13 +538,7 @@ buildLibx264() {
 
     echo ">>> Building libx264 for $TARGET_ARCH ..."
 
-    if [ ! -d "x264" ]; then
-        git clone https://code.videolan.org/videolan/x264.git
-    else
-        cd x264 || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "x264" "https://code.videolan.org/videolan/x264.git"
 
     cd x264 || exit 1
 
@@ -573,13 +581,7 @@ buildLibass() {
 
     echo ">>> Building libass for $TARGET_ARCH ..."
 
-    if [ ! -d "libass" ]; then
-        git clone https://github.com/libass/libass.git
-    else
-        cd libass || exit 1
-        git pull
-        cd ..
-    fi
+    ensure_git_repo "libass" "https://github.com/libass/libass.git"
 
     cd libass || exit 1
     rm -rf build
@@ -700,7 +702,9 @@ fi
 FFMPEG_BUILD_DIR=$(normalize_path "$FFMPEG_BUILD_DIR")
 mkdir -p "$FFMPEG_BUILD_DIR"
 
-for ARCH in "${OHOS_ARCH_LIST[@]}"; do
+mapfile -t OHOS_ARCHES < <(parse_arch_list)
+
+for ARCH in "${OHOS_ARCHES[@]}"; do
     case "$ARCH" in
         "arm64-v8a"|"arm64"|"aarch64")
             TARGET_ARCH="aarch64"
